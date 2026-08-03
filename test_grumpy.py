@@ -329,8 +329,8 @@ class TestCLI(unittest.TestCase):
         self.assertIn("tags: [architecture]", text)
 
     def test_add_increments_the_id(self):
-        self.kb("add", "--title", "One", "--kind", "known-issue")
-        self.kb("add", "--title", "Two", "--kind", "known-issue")
+        self.kb("add", "--title", "One", "--kind", "known-issue", "--tags", "blocker")
+        self.kb("add", "--title", "Two", "--kind", "known-issue", "--tags", "blocker")
         names = sorted(p.name for p in (self.tmp / "notes").glob("*.md"))
         self.assertTrue(names[0].startswith("tn-0001"))
         self.assertTrue(names[1].startswith("tn-0002"))
@@ -351,6 +351,82 @@ class TestCLI(unittest.TestCase):
                 stdin="piped body\n")
         self.assertIn("piped body",
                       next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8"))
+
+    def test_add_auto_detects_a_piped_body_without_stdin_flag(self):
+        self.kb("add", "--title", "T", "--kind", "runbook",
+                stdin="heredoc body without the flag\n")
+        self.assertIn("heredoc body without the flag",
+                      next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8"))
+
+    def test_explicit_body_wins_over_an_empty_pipe(self):
+        self.kb("add", "--title", "T", "--kind", "runbook", "--body", "explicit wins")
+        self.assertIn("explicit wins",
+                      next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8"))
+
+    # -- severity gate (folded into add, not left to the test suite) --------
+
+    def test_add_requires_a_severity_on_a_known_issue(self):
+        out = self.kb("add", "--title", "T", "--kind", "known-issue", expect=2)
+        self.assertIn("needs exactly one severity", out)
+        self.assertEqual(list((self.tmp / "notes").glob("*.md")), [])
+
+    def test_add_requires_a_severity_on_a_task(self):
+        self.kb("add", "--title", "T", "--kind", "task", expect=2)
+
+    def test_force_lets_a_task_through_without_severity(self):
+        self.kb("add", "--title", "T", "--kind", "task", "-f")
+        self.assertEqual(len(list((self.tmp / "notes").glob("*.md"))), 1)
+
+    def test_add_rejects_a_severity_on_an_architecture_note(self):
+        out = self.kb("add", "--title", "T", "--kind", "architecture",
+                      "--tags", "blocker", expect=2)
+        self.assertIn("only for known-issue/task", out)
+
+    # -- --links, validated at write time ----------------------------------
+
+    def test_add_links_writes_a_validated_edge(self):
+        self.kb("add", "--title", "First", "--kind", "architecture",
+                "--body", "the anchor")
+        self.kb("add", "--title", "Second", "--kind", "architecture",
+                "--links", "tn-0001", "--body", "points back")
+        text = next((self.tmp / "notes").glob("tn-0002*")).read_text(encoding="utf-8")
+        self.assertIn("links: [tn-0001]", text)
+
+    def test_add_links_rejects_a_missing_target(self):
+        out = self.kb("add", "--title", "Orphan", "--kind", "architecture",
+                      "--links", "tn-9999", expect=2)
+        self.assertIn("matches no existing note", out)
+        self.assertEqual(list((self.tmp / "notes").glob("*.md")), [])
+
+    def test_force_lets_a_dangling_link_through(self):
+        self.kb("add", "--title", "Orphan", "--kind", "architecture",
+                "--links", "tn-9999", "-f")
+        self.assertEqual(len(list((self.tmp / "notes").glob("*.md"))), 1)
+
+    # -- --json, for chaining ----------------------------------------------
+
+    def test_add_json_emits_the_id_and_links(self):
+        import json as _json
+        self.kb("add", "--title", "Anchor", "--kind", "architecture", "--body", "a")
+        out = self.kb("add", "--title", "Linker", "--kind", "architecture",
+                      "--links", "tn-0001", "--json", "--body", "b")
+        doc = _json.loads(out)
+        self.assertEqual(doc["id"], "tn-0002")
+        self.assertEqual(doc["links"], ["tn-0001"])
+
+    def test_search_json_is_a_parseable_array(self):
+        self._seed()
+        import json as _json
+        doc = _json.loads(self.kb("search", "manifest", "--json"))
+        self.assertEqual(doc[0]["id"], "tn-0001")
+        self.assertEqual(doc[0]["kind"], "known-issue")
+
+    def test_read_json_carries_the_body_and_links(self):
+        import json as _json
+        self.kb("add", "--title", "Anchor", "--kind", "architecture", "--body", "anchor body")
+        doc = _json.loads(self.kb("read", "tn-0001", "--json"))
+        self.assertEqual(doc["id"], "tn-0001")
+        self.assertIn("anchor body", doc["body"])
 
     # -- search ------------------------------------------------------------
 
@@ -403,7 +479,7 @@ class TestCLI(unittest.TestCase):
     def test_search_finds_a_cjk_substring(self):
         """unicode61 tokenises an unbroken CJK run as one token, so FTS alone
         cannot match a substring of a Chinese sentence. The fallback must."""
-        self.kb("add", "--title", "Expiry", "--kind", "known-issue",
+        self.kb("add", "--title", "Expiry", "--kind", "known-issue", "--tags", "blocker",
                 "--body", "優先處理，今天就去要一把新的簽章金鑰")
         self.assertIn("tn-0001", self.kb("search", "簽章金鑰"))
 
@@ -474,7 +550,7 @@ class TestCLI(unittest.TestCase):
 
     def test_task_search_expands_its_context_by_default(self):
         """A task read without the findings behind it is just a sentence."""
-        self.kb("add", "--title", "Background", "--kind", "known-issue",
+        self.kb("add", "--title", "Background", "--kind", "known-issue", "--tags", "blocker",
                 "--body", "the aardvark subsystem drops frames on reboot")
         self.kb("add", "--title", "Fix the aardvark", "--kind", "task", "--force",
                 "--body", "see [[tn-0001]] for what is actually broken")
@@ -482,7 +558,7 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(rows, [("tn-0002", False), ("tn-0001", True)])
 
     def test_expand_zero_suppresses_the_task_default(self):
-        self.kb("add", "--title", "Background", "--kind", "known-issue",
+        self.kb("add", "--title", "Background", "--kind", "known-issue", "--tags", "blocker",
                 "--body", "the aardvark subsystem drops frames on reboot")
         self.kb("add", "--title", "Fix the aardvark", "--kind", "task", "--force",
                 "--body", "see [[tn-0001]] for what is actually broken")
@@ -534,10 +610,11 @@ class TestCLI(unittest.TestCase):
         self.kb("add", "--title", "Build pipeline", "--kind", "architecture",
                 "--body", self.DUP_BODY)
         out = self.kb("add", "--title", "Duplicate retries", "--kind", "known-issue",
+                      "--tags", "blocker",
                       "--body", "the scheduler retries a job whose worker "
                                 "vanished, duplicating every side effect")
         self.assertIn("closest existing note:", out)
-        self.assertRegex(out, r"\(\d+/2000 chars\)")
+        self.assertRegex(out, r"\d+/2000 chars")
 
     # -- length --------------------------------------------------------------
 
@@ -568,6 +645,7 @@ class TestCLI(unittest.TestCase):
         self.kb("add", "--title", "Build pipeline", "--kind", "architecture",
                 "--body", self.DUP_BODY)
         self.kb("add", "--title", "Duplicate retries", "--kind", "known-issue",
+                "--tags", "blocker",
                 "--body", "the scheduler retries a job whose worker vanished, "
                           "duplicating every side effect it had performed")
         self.assertEqual(len(list((self.tmp / "notes").glob("*.md"))), 2)
@@ -575,7 +653,7 @@ class TestCLI(unittest.TestCase):
     # -- lifecycle -----------------------------------------------------------
 
     def _with_status(self, nid_title, status):
-        self.kb("add", "--title", nid_title, "--kind", "known-issue",
+        self.kb("add", "--title", nid_title, "--kind", "known-issue", "--tags", "blocker",
                 "--status", status, "--body", f"a defect about {nid_title} zebra")
 
     def test_settled_entries_drop_out_of_search(self):

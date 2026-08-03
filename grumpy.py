@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import json
 import os
 import re
 import sqlite3
@@ -452,6 +453,15 @@ def cmd_search(args) -> int:
     by_id = {n["id"]: n for n in entries}
     graph = link_graph(entries)
 
+    if args.json:
+        hits = [{
+            "id": nid, "title": title, "kind": kind, "status": status,
+            "tags": ntags.split(), "repos": nrepos.split(),
+            "links": sorted(graph.get(nid, ())),
+        } for nid, title, kind, status, ntags, nrepos, coll in out]
+        print(json.dumps(hits, ensure_ascii=False))
+        return 0
+
     def show(nid, title, kind, status, ntags, nrepos, coll="note",
              prefix="", origin=None):
         pad = " " * len(prefix)
@@ -518,6 +528,42 @@ def cmd_add(args) -> int:
                     f"Add them first (`grumpy tags --add SLUG --parent P`) or pass --force.\n"
                     f"Keeping the tag set small is the point, so prefer an existing tag.")
 
+    # Severity gate, enforced here rather than left to the test suite: a
+    # known-issue or task must answer "how bad if you hit it"; every other kind
+    # must carry none. Same fail-at-write, -f-clearable contract as the tag
+    # gate, so a note that violates the invariant never reaches the content.
+    carried_sev = [t for t in given if t in SEVERITY]
+    if not args.force:
+        if args.kind in ("known-issue", "task") and len(carried_sev) != 1:
+            return _die(
+                f"a {args.kind} needs exactly one severity tag "
+                f"({', '.join(SEVERITY)}); got {carried_sev or 'none'}.\n"
+                f"Add it to --tags, or pass -f."
+            )
+        if args.kind not in ("known-issue", "task") and carried_sev:
+            return _die(
+                f"severity ({', '.join(carried_sev)}) is only for known-issue/task; "
+                f"a {args.kind} must carry none. Drop it from --tags, or pass -f."
+            )
+
+    # --links: validated at write time. The graph is note-to-note, so every
+    # target must be an existing note id; a doc is linked from the doc's own
+    # side, never a note's links: field (that is what breaks the link invariant).
+    link_ids: list[str] = []
+    if args.links:
+        _notes_now = all_notes()
+        _note_ids = {n["id"] for n in _notes_now}
+        _doc_ids = {d["id"] for d in all_docs()}
+        for t in (x.strip() for x in args.links.split(",") if x.strip()):
+            if t in _note_ids or args.force:
+                link_ids.append(t)
+            elif t in _doc_ids:
+                return _die(f"--links {t} is a reference doc; a note's links must "
+                            f"point at notes. Link it from the doc side, or pass -f.")
+            else:
+                return _die(f"--links {t} matches no existing note "
+                            f"(expected e.g. {prefix()}-0003). Check the id, or pass -f.")
+
     slug = re.sub(r"[^a-z0-9]+", "-", args.title.lower()).strip("-")[:48]
     is_doc = args.kind == "reference"
     if is_doc:
@@ -536,7 +582,13 @@ def cmd_add(args) -> int:
         nid = f"{pre}-{max(existing, default=0) + 1:04d}"
         path = NOTES / f"{nid}-{slug}.md"
 
-    body = sys.stdin.read().strip() if args.stdin else (args.body or "").strip()
+    # Read the body from a pipe automatically: an agent almost always heredocs
+    # it in, and requiring an explicit --stdin for that was pure ceremony. An
+    # explicit --body still wins, and an interactive tty is never blocked on.
+    if args.stdin or (not args.body and not sys.stdin.isatty()):
+        body = sys.stdin.read().strip()
+    else:
+        body = (args.body or "").strip()
     if not body:
         body = "TODO: what was observed, what it means, and what to do about it."
 
@@ -552,10 +604,17 @@ def cmd_add(args) -> int:
             f"status: {args.status}\nsummary: {args.summary}\n"
             f"tags: [{', '.join(given)}]\n"
             f"repos: [{', '.join(r.strip() for r in (args.repos or '').split(',') if r.strip())}]\n"
-            f"links: []\ncreated: {_dt.date.today()}\n---\n\n{body}\n",
+            f"links: [{', '.join(link_ids)}]\ncreated: {_dt.date.today()}\n---\n\n{body}\n",
             encoding="utf-8")
-        print(f"wrote {path.relative_to(ROOT)}  ({len(body)} chars, "
+        if args.json:
+            print(json.dumps({"id": nid, "path": str(path.relative_to(ROOT)),
+                              "kind": "reference", "links": link_ids,
+                              "sections": [s for s, _ in sections(body)]},
+                             ensure_ascii=False))
+            return 0
+        print(f"wrote {path.relative_to(ROOT)}  (id {nid}, {len(body)} chars, "
               f"{len(sections(body))} sections)")
+        print(f"next: ./grumpy.py read {nid}")
         return 0
 
     if len(body) > MAX_BODY and not args.force:
@@ -590,16 +649,37 @@ def cmd_add(args) -> int:
         f"status: {args.status}\n"
         f"tags: [{', '.join(given)}]\n"
         f"repos: [{repos}]\n"
-        f"links: []\n"
+        f"links: [{', '.join(link_ids)}]\n"
         f"created: {_dt.date.today()}\n"
         f"---\n\n{body}\n\n## Discussion\n",
         encoding="utf-8",
     )
-    print(f"wrote {path.relative_to(ROOT)}  ({len(body)}/{MAX_BODY} chars)")
+
+    closest = None
     if scored:
         s, n = scored[0]
-        note = "  <- link these" if s >= DUP_THRESHOLD else ""
-        print(f"closest existing note: {s:.0%}  {n['id']}  {n['title']}{note}")
+        closest = {"score": round(s, 4), "id": n["id"], "title": n["title"]}
+
+    if args.json:
+        print(json.dumps({
+            "id": nid,
+            "path": str(path.relative_to(ROOT)),
+            "kind": args.kind,
+            "status": args.status,
+            "tags": given,
+            "repos": [r for r in repos.split(", ") if r],
+            "links": link_ids,
+            "chars": len(body),
+            "closest": closest,
+        }, ensure_ascii=False))
+        return 0
+
+    print(f"wrote {path.relative_to(ROOT)}  (id {nid}, {len(body)}/{MAX_BODY} chars)")
+    if closest:
+        tail = "  <- link these" if closest["score"] >= DUP_THRESHOLD else ""
+        print(f"closest existing note: {closest['score']:.0%}  "
+              f"{closest['id']}  {closest['title']}{tail}")
+    print(f"next: ./grumpy.py read {nid} --context")
     return 0
 
 
@@ -708,18 +788,23 @@ the failure mode this exists to prevent.
 Run from `{root}`. Stdlib Python only, nothing to install.
 
 ```bash
-./grumpy.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]]
+./grumpy.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]] [--json]
 ./grumpy.py issues [--severity S] [--repo R]
-./grumpy.py read <id> [--context] [--section NAME] [--full]
-./grumpy.py add --title T --kind K [--tags a,b] [--repos x,y] [--stdin]
+./grumpy.py read <id> [--context] [--section NAME] [--full] [--json]
+./grumpy.py add --title T --kind K [--tags a,b] [--repos x,y] [--links id,id] [--json]
 ./grumpy.py tags [--add SLUG --parent P] [--move SLUG --parent P]
 ./grumpy.py discuss <id> -m "..."
 ```
 
+`add` reads the body from a pipe (heredoc) automatically, or takes `--body`.
+
 Notes are atomic: one claim, capped at {cap} characters. Reference docs in
 `docs/` are the sanctioned way to be long and are read a section at a time.
-`add` refuses an unknown tag, an over-length body, or more than {dup:.0%} overlap
-with an existing note; `-f` clears all three.
+`add` argues at write time: it refuses an unknown tag, an over-length body,
+{dup:.0%}+ overlap, a known-issue/task with no severity, or a `--links` target
+that is not an existing note; `-f` clears any of them. Wire edges in the same
+call with `--links`, and pass `--json` (on add/search/read) to chain without
+parsing prose; `add --json` returns the new id.
 
 ## Start here
 
@@ -812,10 +897,14 @@ def cmd_init(args) -> int:
                                      encoding="utf-8")
     (dest / "SKILL.md").write_text(STARTER_SKILL.format(
         name=name, title=args.title or name,
-        description=args.description or
-        f"Search the {name} knowledge base before grepping the codebase, and "
-        f"record what you learn. EDITME: name the repos and the failure modes "
-        f"this should trigger on, because a vague description never fires.",
+        description=args.description or (
+            f"Search the {name} knowledge base before grepping the codebase, and "
+            f"record what you learn. Use when working in "
+            f"<EDITME: repo or directory paths> or on <EDITME: the component names "
+            f"people actually say>; and when debugging <EDITME: the concrete "
+            f"symptoms and error strings that should trigger this>. Real paths and "
+            f"real error text make it fire at the right moment; a vague description "
+            f"never does."),
         blurb=args.title or f"Knowledge base for {name}.",
         root=dest, cap=MAX_BODY, dup=DUP_THRESHOLD, prefix=pre), encoding="utf-8")
 
@@ -884,6 +973,22 @@ def cmd_read(args) -> int:
     e = find_entry(args.id)
     if not e:
         return _die(f"no note or doc matching {args.id!r}")
+
+    if args.json:
+        entries = all_notes() + all_docs()
+        by_id = {x["id"]: x for x in entries}
+        nbrs = sorted(link_graph(entries).get(e["id"], ()))
+        out = {k: e[k] for k in
+               ("id", "title", "kind", "status", "tags", "repos", "links", "body")}
+        if e["kind"] == "reference":
+            out["summary"] = e.get("summary", "")
+            out["sections"] = [s for s, _ in sections(e["body"])]
+        if args.context:
+            out["context"] = [{"id": i, "title": by_id[i]["title"],
+                               "kind": by_id[i]["kind"], "status": by_id[i]["status"]}
+                              for i in nbrs]
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
 
     if e["kind"] != "reference":
         print(f"# {e['title']}")
@@ -982,6 +1087,8 @@ def main() -> int:
     s.add_argument("--status", help="exact status; implies --all")
     s.add_argument("--all", action="store_true",
                    help=f"include settled entries ({', '.join(CLOSED_STATUS)})")
+    s.add_argument("--json", action="store_true",
+                   help="print hits as a JSON array (id, kind, tags, links) for chaining")
     s.add_argument("--expand", nargs="?", type=int, const=1, default=None,
                    metavar="HOPS",
                    help="also show linked notes, up to HOPS away (default 1). "
@@ -999,8 +1106,15 @@ def main() -> int:
     a.add_argument("--tags", help="comma-separated slugs")
     a.add_argument("--repos", help="comma-separated repo names")
     a.add_argument("--status", default="open")
+    a.add_argument("--links", help="comma-separated note ids to link, "
+                   "validated against existing notes at write time")
     a.add_argument("--body")
-    a.add_argument("--stdin", action="store_true", help="read body from stdin")
+    a.add_argument("--stdin", action="store_true",
+                   help="force reading the body from stdin (a pipe is auto-detected "
+                        "anyway, so this is rarely needed)")
+    a.add_argument("--json", action="store_true",
+                   help="print the created note as JSON (id, path, links, closest) "
+                        "for chaining")
     a.add_argument("-f", "--force", action="store_true",
                    help="write anyway: allow an unknown tag, an over-length "
                         "body, or overlap with an existing note")
@@ -1019,6 +1133,8 @@ def main() -> int:
     r0.add_argument("--full", action="store_true", help="print the whole doc")
     r0.add_argument("--context", action="store_true",
                     help="also list what links to it - decisions, tasks, runbooks")
+    r0.add_argument("--json", action="store_true",
+                    help="print the entry as JSON (fields, body, and context if asked)")
     r0.set_defaults(fn=cmd_read)
 
     n0 = sub.add_parser("init", help="scaffold a new knowledge base elsewhere")

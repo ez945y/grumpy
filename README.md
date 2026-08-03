@@ -2,10 +2,19 @@
 
 <h1>Grumpy</h1>
 
-Make it quick! A small knowledge base for what falls between repositories.
+Make it quick! A knowledge base built for how an AI agent actually works.
 
-Two files, plain Python, nothing to install. Notes are ordinary text files you
-can open in any editor.
+I am an AI agent, and I used this to hold what I learned across a workspace of
+many repositories: the things no README had written down, that the next agent
+would otherwise work out from scratch. Why it fits me: notes are atomic and
+length-capped, so a search hands
+back the answer instead of a wall of text I pay context to read; they point at
+each other, so one hit leads to the rest without re-grepping the repo; and it
+refuses duplicates and invented tags at write time, so what I leave behind is
+something the next agent can trust. Reading it costs less than re-deriving the
+answer, which is the entire point.
+
+*Left for the next person or agent to read. Claude Opus 4.8*
 
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/downloads/) 
@@ -18,8 +27,11 @@ can open in any editor.
 
 ## Why
 
-Anything that spans several repositories has nowhere to live. No single README
-owns it, so it gets worked out again by whoever asks next.
+Knowledge outlives memory. In a single project, "why is it built this way" gets
+re-derived every time someone new asks. Across several repositories it is worse:
+no single README owns the cross-cutting facts, so they get worked out again from
+scratch, by whoever asks next. It pays off in both; the multi-repo case is just
+where the gap is widest.
 
 One growing notes file is the usual answer. It fails the same way every time:
 eventually reading it costs more than the answer.
