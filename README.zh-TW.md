@@ -42,6 +42,7 @@ git clone <this repo> grumpy
 ./grumpy.py read n-0004 --context               # 一則筆記，加上它連到的東西
 ./grumpy.py add --title "..." --kind known-issue --tags major
 ./grumpy.py discuss n-0004 -m "這個應該要好好修一下"
+./grumpy.py install                             # 讓 agent 工具看得到它
 ```
 
 處理問題時最有用的是 `read --context`。筆記告訴你什麼壞了，而 context 告訴你

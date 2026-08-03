@@ -10,6 +10,7 @@ way a caller does.
 from __future__ import annotations
 
 import importlib
+import os
 import re
 import shutil
 import subprocess
@@ -888,6 +889,87 @@ class TestIssuesAndContext(unittest.TestCase):
         self.kb("add", "--title", "The defect", "--kind", "known-issue",
                 "--tags", "major", "--body", "something is wrong in the widget")
         self.assertNotIn("## Context", self.kb("read", "tn-0001"))
+
+
+class TestInstall(unittest.TestCase):
+    """Linking a base into a skills directory is the step people skip, so it
+    has to be one command and it has to refuse to clobber anything."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        self.base = self.tmp / "base"
+        self.base.mkdir()
+        shutil.copy(HERE / "grumpy.py", self.base / "grumpy.py")
+        (self.base / "grumpy.conf").write_text("prefix = tn\nname = mybase\n",
+                                               encoding="utf-8")
+        (self.base / "SKILL.md").write_text("---\nname: mybase\n---\n",
+                                            encoding="utf-8")
+
+    def run_in(self, cwd, *args, expect=0):
+        """Runs the copy that lives in cwd when there is one, because ROOT is
+        derived from the script's own path and that is what decides which base
+        is being installed."""
+        env = {**os.environ, "HOME": str(self.home)}
+        script = Path(cwd) / "grumpy.py"
+        if not script.exists():
+            script = self.base / "grumpy.py"
+        r = subprocess.run([sys.executable, str(script), *args],
+                           cwd=cwd, capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, expect, r.stdout + r.stderr)
+        return r.stdout + r.stderr
+
+    def test_install_links_into_the_user_skills_directory(self):
+        self.run_in(self.base, "install")
+        link = self.home / ".claude" / "skills" / "mybase"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), self.base.resolve())
+
+    def test_install_is_idempotent(self):
+        self.run_in(self.base, "install")
+        self.assertIn("already linked", self.run_in(self.base, "install"))
+
+    def test_install_refuses_to_steal_another_bases_name(self):
+        self.run_in(self.base, "install")
+        other = self.tmp / "other"
+        other.mkdir()
+        shutil.copy(HERE / "grumpy.py", other / "grumpy.py")
+        (other / "grumpy.conf").write_text("name = mybase\n", encoding="utf-8")
+        (other / "SKILL.md").write_text("---\nname: mybase\n---\n", encoding="utf-8")
+        out = self.run_in(other, "install", expect=2)
+        self.assertIn("points at", out)
+        self.assertEqual((self.home / ".claude/skills/mybase").resolve(),
+                         self.base.resolve())
+
+    def test_install_refuses_when_a_real_directory_is_in_the_way(self):
+        (self.home / ".claude" / "skills" / "mybase").mkdir(parents=True)
+        out = self.run_in(self.base, "install", expect=2)
+        self.assertIn("not a link", out)
+
+    def test_project_scope_links_beside_the_caller(self):
+        work = self.tmp / "work"
+        work.mkdir()
+        self.run_in(work, "install", "--project")
+        self.assertTrue((work / ".claude" / "skills" / "mybase").is_symlink())
+        self.assertFalse((self.home / ".claude" / "skills" / "mybase").exists())
+
+    def test_install_needs_a_skill_file(self):
+        (self.base / "SKILL.md").unlink()
+        self.assertIn("no SKILL.md", self.run_in(self.base, "install", expect=2))
+
+    def test_init_can_create_and_link_in_one_command(self):
+        dest = self.tmp / "fresh"
+        out = self.run_in(self.tmp, "init", str(dest), "--name", "fresh", "--install")
+        self.assertIn("linked", out)
+        self.assertTrue((self.home / ".claude" / "skills" / "fresh").is_symlink())
+
+    def test_init_without_install_says_how(self):
+        dest = self.tmp / "fresh2"
+        out = self.run_in(self.tmp, "init", str(dest), "--name", "fresh2")
+        self.assertIn("grumpy.py install", out)
+        self.assertFalse((self.home / ".claude" / "skills" / "fresh2").exists())
 
 
 class TestSections(TempWorkspace):

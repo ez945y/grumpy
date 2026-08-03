@@ -740,6 +740,43 @@ tag resolves and every `[[{prefix}-NNNN]]` link points at something real.
 """
 
 
+def _link_skill(base: Path, name: str, project: bool) -> tuple[bool, str]:
+    """Symlink a knowledge base into a skills directory.
+
+    A link rather than a copy, so editing notes takes effect immediately and
+    there is only ever one of them. The directory has to be named after the
+    skill, which is why the name in grumpy.conf and the link name must agree.
+    """
+    skills = (Path.cwd() / ".claude" / "skills") if project \
+        else (Path.home() / ".claude" / "skills")
+    skills.mkdir(parents=True, exist_ok=True)
+    link = skills / name
+
+    if link.is_symlink():
+        if link.resolve() == base.resolve():
+            return True, f"already linked: {link}"
+        return False, (f"{link} points at {link.resolve()}, not {base}.\n"
+                       f"Remove it first, or use a different --name.")
+    if link.exists():
+        return False, f"{link} exists and is not a link. Move it out of the way."
+
+    link.symlink_to(base)
+    return True, f"linked {link} -> {base}"
+
+
+def cmd_install(args) -> int:
+    """Make an existing knowledge base visible to agent tools."""
+    name = conf().get("name") or ROOT.name
+    if not (ROOT / "SKILL.md").exists():
+        return _die("no SKILL.md here, so there is nothing for an agent to load")
+    ok, msg = _link_skill(ROOT, name, args.project)
+    print(("  " if ok else "") + msg)
+    if not ok:
+        return 2
+    print("\nRestart your agent tool for it to notice.")
+    return 0
+
+
 def cmd_init(args) -> int:
     """Scaffold a new knowledge base somewhere else.
 
@@ -783,12 +820,20 @@ def cmd_init(args) -> int:
         root=dest, cap=MAX_BODY, dup=DUP_THRESHOLD, prefix=pre), encoding="utf-8")
 
     print(f"created {dest}")
-    print(f"  prefix: {pre}-0001, {pre}-0002, ...")
+    print(f"  note ids: {pre}-0001, {pre}-0002, ...")
+
+    if args.install:
+        ok, msg = _link_skill(dest, name, args.project)
+        print("  " + msg)
+        if not ok:
+            print("  (the knowledge base itself was still created)")
+
     print("\nNext:")
-    print("  1. edit tags.md      - replace the EDITME area branch")
-    print("  2. edit SKILL.md     - the description decides whether it ever fires")
+    print("  1. edit tags.md    replace the EDITME area branch")
+    print("  2. edit SKILL.md   the description decides whether an agent loads it")
     print(f"  3. cd {dest} && ./grumpy.py add --title ... --kind architecture")
-    print(f"  4. ln -s {dest} ~/.claude/skills/{name}")
+    if not args.install:
+        print(f"  4. ./grumpy.py install   make it visible to your agent tool")
     return 0
 
 
@@ -983,7 +1028,18 @@ def main() -> int:
     n0.add_argument("--title")
     n0.add_argument("--description", help="what makes the skill trigger")
     n0.add_argument("--force", action="store_true")
+    n0.add_argument("--install", action="store_true",
+                    help="also link it into your skills directory")
+    n0.add_argument("--project", action="store_true",
+                    help="with --install, link into ./.claude/skills "
+                         "instead of ~/.claude/skills")
     n0.set_defaults(fn=cmd_init)
+
+    v = sub.add_parser("install",
+                       help="link this knowledge base into a skills directory")
+    v.add_argument("--project", action="store_true",
+                   help="link into ./.claude/skills instead of ~/.claude/skills")
+    v.set_defaults(fn=cmd_install)
 
     i = sub.add_parser("issues", help="open defects, worst first")
     i.add_argument("--severity", choices=list(SEVERITY))

@@ -30,12 +30,20 @@ found. Add `-f` if you meant it.
 
 ```bash
 git clone <this repo> grumpy
-./grumpy/grumpy.py init ~/my-notes --name my-notes --title "My notes"
+./grumpy/grumpy.py init ~/my-notes --name my-notes --install
 ```
 
-That creates an empty knowledge base. Two things are worth editing before you
-start writing: the list of areas in `tags.md`, and the description at the top
-of `SKILL.md`, which is what decides whether an AI tool picks it up.
+`--install` links it into `~/.claude/skills/`, so Claude Code and anything else
+that reads skills will find it. Use `--project` instead to link it beside the
+code, in `./.claude/skills/`. **Restart your agent tool afterwards**, since the
+skill list is read once at startup.
+
+Already have a knowledge base and want to link it? `./grumpy.py install`.
+
+Two things are worth editing before you start writing: the list of areas in
+`tags.md`, and the description at the top of `SKILL.md`. That description is
+the only thing deciding whether an agent reaches for this, so a vague one means
+it never gets used.
 
 ## Use
 
@@ -45,6 +53,7 @@ of `SKILL.md`, which is what decides whether an AI tool picks it up.
 ./grumpy.py read n-0004 --context               # one note, plus what it links to
 ./grumpy.py add --title "..." --kind known-issue --tags major
 ./grumpy.py discuss n-0004 -m "we should fix this properly"
+./grumpy.py install                             # make it visible to agent tools
 ```
 
 `read --context` is the useful one for a problem. The note tells you what is
