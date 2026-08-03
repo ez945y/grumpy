@@ -1,11 +1,20 @@
-# grumpy
+<div align="center">
 
-**English** · [繁體中文](README.zh-TW.md)
+<h1>Grumpy</h1>
 
-A small knowledge base for what falls between repositories.
+Make it quick! A small knowledge base for what falls between repositories.
 
 Two files, plain Python, nothing to install. Notes are ordinary text files you
 can open in any editor.
+
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/downloads/) 
+</br>
+**English** · [繁體中文](README.zh-TW.md) · [Why](#why) · [Quick Start](#quick-start) · [Use](#use) · [For developers](#for-developers)
+
+</br>
+<img width="558" height="439" alt="image" src="https://github.com/user-attachments/assets/78f20453-c16d-4b68-b7d8-8c857591142b" />
+</div>
 
 ## Why
 
@@ -26,7 +35,7 @@ It is called grumpy because it turns writes down that would undo this: a
 duplicate, an over-long note, a label invented on the spot. It says what it
 found. Add `-f` if you meant it.
 
-## Start
+## Quick Start
 
 ```bash
 git clone <this repo> grumpy
