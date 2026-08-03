@@ -696,6 +696,11 @@ class TestRealContent(unittest.TestCase):
 
     def setUp(self) -> None:
         importlib.reload(kb)
+        # The engine ships without content — a bare checkout has no tags.md,
+        # no notes/ and no SKILL.md. These are instance invariants, so they
+        # skip rather than fail there; the engine's own suite stays green.
+        if not kb.TAGS_FILE.exists():
+            self.skipTest("no instance content beside the engine")
 
     def test_tags_file_parses_and_slugs_are_unique(self):
         self.assertGreater(len(kb.load_tags()), 5)
@@ -903,7 +908,10 @@ class TestSkillFile(unittest.TestCase):
     """SKILL.md is loaded by agent runtimes, which key off its frontmatter."""
 
     def setUp(self) -> None:
-        self.text = (HERE / "SKILL.md").read_text(encoding="utf-8")
+        skill = HERE / "SKILL.md"
+        if not skill.exists():
+            self.skipTest("no SKILL.md beside the engine")
+        self.text = skill.read_text(encoding="utf-8")
 
     def test_has_frontmatter_with_name_and_description(self):
         self.assertTrue(self.text.startswith("---\n"))
@@ -913,11 +921,12 @@ class TestSkillFile(unittest.TestCase):
         self.assertRegex(front, r"(?m)^name:\s*\S+")
         self.assertRegex(front, r"(?m)^description:\s*\S+")
 
-    def test_name_matches_the_directory(self):
+    def test_name_matches_the_instance(self):
+        """A skill is loaded from a directory named after it, so the two must
+        agree. kb.conf is the authority when it names one."""
         end = self.text.find("\n---\n", 4)
         name = re.search(r"(?m)^name:\s*(\S+)", self.text[4:end]).group(1)
-        self.assertEqual(name, HERE.name,
-                         "skill name must match the folder it is installed as")
+        self.assertEqual(name, kb.conf().get("name", HERE.name))
 
     def test_description_is_specific_enough_to_trigger(self):
         """A vague description is why a skill never fires. This cannot check
