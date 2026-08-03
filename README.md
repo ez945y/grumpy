@@ -2,153 +2,94 @@
 
 **English** · [繁體中文](README.zh-TW.md)
 
-A knowledge base that argues with you before it lets you write anything down.
+A small knowledge base for the things a project never writes down.
 
-Two files. No dependencies. No server, no embeddings, no vector database.
-Python 3.11+ and the standard library.
+Two files, plain Python, nothing to install. Notes are ordinary text files you
+can open in any editor.
 
-## Why it says no
+## Why
 
-Most tools for agent memory optimise for capture: make it easy to save
-something, worry about the mess later. That mess is the whole problem. After a
-month you have four versions of one fact, none of them dated, and no way to
-tell which is current. Loading it costs more than the answer is worth.
+When an AI assistant works on a large codebase, it works the same things out
+over and over: which part owns what, why a build fails on a fresh copy, what
+was decided about it and why. None of that survives into the next conversation.
 
-grumpy refuses instead. Every write has to get past three gates:
+The usual fix is one growing notes file. That works until it gets long enough
+that reading it costs more than the answer was worth.
 
-| Gate | Limit | Why |
-|------|-------|-----|
-| Unknown tag | must already be in the tag tree | a vocabulary that grows without limit stops being a vocabulary |
-| Body length | 2000 characters | a longer note holds two claims, and the second one becomes unfindable |
-| Overlap with an existing note | 60% | two copies of a fact drift apart, and then nobody knows which is right |
+grumpy keeps itself small:
 
-Each refusal shows you what it found and why, so you can extend the existing
-note instead. `-f` overrides all three when you really do mean it.
+- **One note answers one question.** Notes are limited to about half a page, so
+  a search result is the answer rather than something to read through.
+- **Bigger things are kept apart.** A map of how the pieces fit together lives
+  in `docs/` and is read one section at a time. A search shows you its contents
+  page, not the whole thing.
+- **Anything marked resolved stops showing up**, and it tells you how many it
+  hid.
+- **Notes point at each other in both directions**, so finding one leads you to
+  the rest of the story.
 
-That is the entire pitch. Everything else follows from wanting recall to stay
-cheap.
-
-## The problem it was built for
-
-Large systems live in many repositories. An agent can read all of them, and
-that is exactly the problem, because it reads them again every session. The
-same afternoon of digging repeats: which repo owns this, why does that build
-fail from a clean checkout, what did we decide about it and why. Nothing
-learned survives the context it was learned in.
-
-A growing memory file does not fix this, and neither does a README, because
-both force the same trade: load everything, or find nothing.
-
-What is wanted is closer to recall than to reading. The one thing that matters
-right now, and nothing else. Our cells are replaced continuously and we never
-notice it happening; what persists is not the material but the pattern. An
-agent's context turns over the same way. This is an attempt at the pattern that
-outlives it, so one agent can hand off to the next without either of them
-re-deriving what was already known.
-
-## Light on context by design
-
-- **Atomic notes.** A search hit should *be* the answer, not a document to
-  skim.
-- **Big things are a separate kind.** A map or a table is `reference`, lives in
-  `docs/`, and is read a section at a time. Search shows its summary and its
-  section names, never its body, so an outline costs a few lines and you pull
-  only the part you need.
-- **Links are symmetric.** A note cites what it depends on; whoever lands on
-  the cited note needs to find the citer. One hit leads to the rest of the
-  topic instead of dead-ending.
-- **Settled entries disappear.** A fixed defect is history, and history crowds
-  out what still bites. Search tells you how many it hid.
-- **Tags are a tree, referenced by slug.** Re-parenting one is a single line
-  edit that touches no note.
+It is called grumpy because it turns writes down. If a note repeats one you
+already have, runs too long, or uses a label invented on the spot, it stops and
+shows you what it found. Add `-f` if you meant it.
 
 ## Start
 
 ```bash
 git clone <this repo> grumpy
-./grumpy/grumpy.py init ~/my-project-notes --name my-project-notes \
-    --title "My project notes"
+./grumpy/grumpy.py init ~/my-notes --name my-notes --title "My notes"
 ```
 
-That copies the engine, writes an instance config with its own note id prefix,
-a starter tag tree, and a `SKILL.md` for agent runtimes that load skills. Then
-edit two things: the `area` branch of `tags.md`, and the `description` in
-`SKILL.md`, which is what decides whether the skill ever fires.
+That creates an empty knowledge base. Two things are worth editing before you
+start writing: the list of areas in `tags.md`, and the description at the top
+of `SKILL.md`, which is what decides whether an AI tool picks it up.
 
 ## Use
 
 ```bash
-./grumpy.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]]
-./grumpy.py issues [--severity S] [--repo R]      # open defects, worst first
-./grumpy.py read <id> [--context] [--section NAME] [--full]
-./grumpy.py add --title T --kind K [--tags a,b] [--repos x,y] [--stdin]
-./grumpy.py tags [--add SLUG --parent P] [--move SLUG --parent P]
-./grumpy.py discuss <id> -m "..."
-./grumpy.py init <dir>
+./grumpy.py search "why does the build fail"    # find something
+./grumpy.py issues                              # known problems, worst first
+./grumpy.py read n-0004 --context               # one note, plus what it links to
+./grumpy.py add --title "..." --kind known-issue --tags major
+./grumpy.py discuss n-0004 -m "we should fix this properly"
 ```
 
-`read --context` is the one to reach for on a defect. It gives you the note
-plus everything linked to it, listed by kind. A defect on its own leaves the
-obvious questions open (was a decision forced by it, is anyone assigned, which
-runbook routes around it) and opening five files to answer them is enough
-friction that nobody does.
+`read --context` is the useful one for a problem. The note tells you what is
+broken; the context tells you what was decided about it, who is on it, and
+which set of steps works around it.
 
-Six kinds: `architecture`, `known-issue`, `decision`, `runbook`, `reference`,
-`task`. The test for choosing one: *if a different person had done this same
-work, would the note read the same?* Always the same means the system simply is
-that way. Possibly different means someone chose, and the note has to be able
-to name the alternatives it rejected.
+Every note is one of six kinds: `architecture` (how something is built),
+`known-issue` (something broken), `decision` (a choice and why), `runbook`
+(steps that work), `reference` (a map or table), `task` (outstanding work).
 
-Search is bilingual. FTS5 handles English with stemming and ranking, and
-because its tokeniser treats an unbroken run of CJK as a single token, a query
-FTS cannot answer falls back to a substring scan.
+To choose between the first three, ask whether someone else doing the same work
+would have written the same note. Always the same means the system is simply
+like that, so it is architecture. Possibly different means someone made a call,
+so it is a decision, and it has to say what the other options were.
 
-Notes are markdown with a small frontmatter block. Everything stays readable
-with `cat` and editable in any editor. The CLI is a convenience, never a
-requirement.
+## For developers
 
-## Layout
+Search is SQLite full-text search, built into Python, rebuilt automatically
+when a file changes. There is no server, no separate database and no
+embeddings. Queries the tokeniser cannot split, Chinese among them, fall back
+to a substring match.
 
-```
-grumpy.py        the engine, which knows nothing about any particular project
-test_grumpy.py   107 tests
-grumpy.conf      instance config: note id prefix, name, title
-tags.md          the tag tree, and the conventions it enforces
-SKILL.md         entry point for agent runtimes
-notes/           atomic notes
-docs/            reference documents
-```
-
-The two engine files carry no project information, which is what lets one copy
-serve any number of knowledge bases. Everything else in an instance is content.
-
-## Notes worth keeping
-
-The failure mode is not too few notes. It is notes nobody can trust.
-
-**Cite what you checked**: `file.go:123`, or the command and its output. A claim
-nobody can re-verify gets trusted blindly, and is eventually wrong.
-
-**Separate observed from inferred.** "I read this in the source" and "I ran this
-and saw that" are different confidence levels, so say which one it is. A
-confident note that turns out to be false is worse than no note, because the
-next reader will not re-check it.
-
-Skip anything a `git log` or a glance at the file would have told you. The value
-is entirely in what cost time to work out.
-
-## Tests
+`grumpy.py` and `test_grumpy.py` contain nothing about any particular project,
+so one copy can serve several knowledge bases. Everything project-specific sits
+in `grumpy.conf`, `tags.md`, `notes/` and `docs/` beside them.
 
 ```bash
-python3 -m unittest test_grumpy -v
+python3 -m unittest test_grumpy -v      # 107 tests
 ```
 
-Unit tests cover frontmatter parsing, the tag tree, the link graph and its
-traversal, section splitting, near-duplicate detection and index freshness.
-End-to-end tests drive the CLI as a subprocess. A final group validates whatever
-content sits beside it: every tag resolves, every wiki link points at something
-real, ids are unique and match their filenames, no entry document cites a note
-that was deleted. Those skip cleanly on a bare engine or a freshly scaffolded
-base, so both are green out of the box.
+Unit tests cover parsing, the tag tree, the link graph and the duplicate check.
+End-to-end tests run the command itself. A last group checks the content next
+to it: every label resolves, every link points at a real note, ids are unique.
+That group skips when there is no content, so a fresh clone is green.
 
-Run it after editing notes by hand.
+## Writing notes worth keeping
+
+The problem is never too few notes. It is notes nobody trusts.
+
+Write down what you actually checked, and say whether you read it or ran it.
+Those are different levels of confidence. Skip anything the version history
+would have told you anyway.
