@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""kb — a small, file-backed knowledge base with a searchable link graph.
+"""grumpy - a small, file-backed knowledge base that argues with you.
 
 Stdlib only. No server, no embeddings, no vector store. Notes are markdown
 files; search is SQLite FTS5 over them, rebuilt automatically when a file
 changes. The whole thing is meant to stay readable with `cat` and editable
-with any text editor — the CLI is a convenience, never a requirement.
+with any text editor; the CLI is a convenience, never a requirement.
 
-  kb search <query> [--tag T] [--repo R] [--kind K]
-  kb add --title T --kind K [--tags a,b] [--repos x,y]
-  kb tags [--tree | --add SLUG --parent P | --move SLUG --parent P]
-  kb discuss <id> -m "..."
+  grumpy search <query> [--tag T] [--repo R] [--kind K]
+  grumpy add --title T --kind K [--tags a,b] [--repos x,y]
+  grumpy tags [--tree | --add SLUG --parent P | --move SLUG --parent P]
+  grumpy discuss <id> -m "..."
 """
 
 from __future__ import annotations
@@ -27,13 +27,13 @@ ROOT = Path(__file__).resolve().parent
 NOTES = ROOT / "notes"
 DOCS = ROOT / "docs"
 TAGS_FILE = ROOT / "tags.md"
-CONF_FILE = ROOT / "kb.conf"
+CONF_FILE = ROOT / "grumpy.conf"
 INDEX = ROOT / ".index.db"
 
 LIST_KEYS = {"tags", "repos", "links"}
 
 # A note carries one issue. Past roughly this length it is carrying two, and
-# the second one becomes unfindable — nobody searches for a claim buried in
+# the second one becomes unfindable, because nobody searches for a claim buried in
 # paragraph six. The existing notes sit around 1200 characters; this ceiling
 # leaves room to edit without inviting an essay. Splitting and linking is
 # almost always the better move, which is why `add` refuses rather than warns.
@@ -44,7 +44,7 @@ MAX_BODY = 2000
 DUP_THRESHOLD = 0.6
 
 # Lifecycle, carried in `status:`. Anything in CLOSED is settled and drops out
-# of search by default — a fixed bug is history, and history crowds out the
+# of search by default. A fixed bug is history, and history crowds out the
 # things that still bite. `workaround-applied` and `reported-upstream` stay
 # visible on purpose: both mean the defect is still there, and the first one
 # also explains why some local override file exists.
@@ -56,11 +56,11 @@ CLOSED_STATUS = ("resolved", "fixed", "done", "wontfix", "duplicate", "obsolete"
 # Instance configuration
 #
 # This file is the engine. Everything that names a particular project lives in
-# kb.conf and in the content beside it, so the same kb.py serves any number of
-# knowledge bases. `kb init` scaffolds a new one.
+# grumpy.conf and in the content beside it, so the same grumpy.py serves any
+# knowledge bases. `grumpy init` scaffolds a new one.
 # ---------------------------------------------------------------------------
 
-DEFAULT_CONF = {"prefix": "kb", "name": "knowledge-base", "title": "Knowledge base"}
+DEFAULT_CONF = {"prefix": "n", "name": "knowledge-base", "title": "Knowledge base"}
 
 
 def conf() -> dict:
@@ -130,7 +130,7 @@ def all_notes() -> list[dict]:
 # Reference documents
 #
 # Some things do not fit in one claim. A repo map, a port table, the shape of
-# a single service — you consult those, you do not read them once. Forcing them
+# a single service: you consult those, you do not read them once. Forcing them
 # under the note length cap would shred them into fragments nobody can follow.
 #
 # They live in docs/ instead, uncapped, and are loaded in layers so a reader
@@ -201,7 +201,7 @@ def load_tags() -> dict[str, dict]:
             stack.pop()
         parent = stack[-1][1] if stack else None
         if slug in tags:
-            sys.exit(f"tags.md: duplicate slug {slug!r} — slugs must be unique")
+            sys.exit(f"tags.md: duplicate slug {slug!r}, and slugs must be unique")
         tags[slug] = {"parent": parent, "desc": desc, "depth": len(stack)}
         stack.append((indent, slug))
     return tags
@@ -262,7 +262,7 @@ def write_tags(tags: dict) -> None:
 # ---------------------------------------------------------------------------
 # Link graph
 #
-# Links are written one way — a note cites what it depends on — but reading is
+# Links are written one way, a note citing what it depends on, but reading is
 # always two way: whoever lands on a cited note wants to know who cited it. The
 # graph is therefore symmetrised on load, and a `[[<prefix>-NNNN]]` reference in
 # a body counts as an edge so prose links are not second-class.
@@ -317,7 +317,7 @@ def _shingles(text: str) -> set[str]:
 def similar_notes(title: str, body: str, notes: list[dict],
                   threshold: float = DUP_THRESHOLD,
                   floor: int = 12) -> list[tuple[float, dict]]:
-    """Overlap coefficient — |A n B| / min(|A|, |B|) — on word sets.
+    """Overlap coefficient, |A n B| / min(|A|, |B|), on word sets.
 
     Not Jaccard: the duplicate that actually happens is a short note restating
     part of a long one, and Jaccard divides by the union, so the long note's
@@ -423,7 +423,7 @@ def cmd_search(args) -> int:
     wanted = set()
     for t in args.tag or []:
         if t not in tags:
-            print(f"warning: unknown tag {t!r} (see `kb tags`)", file=sys.stderr)
+            print(f"warning: unknown tag {t!r} (see `grumpy tags`)", file=sys.stderr)
         wanted |= descendants(t, tags)
 
     out = []
@@ -470,7 +470,7 @@ def cmd_search(args) -> int:
                 names = [s for s, _ in sections(d["body"])]
                 if names:
                     print(f"{pad}    sections: {' | '.join(names)}")
-                print(f"{pad}    read:  ./kb.py read {nid} --section \"<name>\"")
+                print(f"{pad}    read:  ./grumpy.py read {nid} --section \"<name>\"")
         nbrs = sorted(graph.get(nid, ()))
         if nbrs:
             print(f"{pad}    -> {' '.join(nbrs)}")
@@ -515,19 +515,19 @@ def cmd_add(args) -> int:
     unknown = [t for t in given if t not in tags]
     if unknown and not args.force:
         return _die(f"unknown tag(s): {', '.join(unknown)}\n"
-                    f"Add them first (`kb tags --add SLUG --parent P`) or pass --force.\n"
-                    f"Keeping the tag set small is the point — prefer an existing tag.")
+                    f"Add them first (`grumpy tags --add SLUG --parent P`) or pass --force.\n"
+                    f"Keeping the tag set small is the point, so prefer an existing tag.")
 
     slug = re.sub(r"[^a-z0-9]+", "-", args.title.lower()).strip("-")[:48]
     is_doc = args.kind == "reference"
     if is_doc:
-        # A doc is addressed by name, not by number: `kb read repo-map` is
+        # A doc is addressed by name, not by number: `grumpy read <name>` is
         # something a person can type from memory.
         DOCS.mkdir(exist_ok=True)
         nid = args.slug or slug
         path = DOCS / f"{nid}.md"
         if path.exists() and not args.force:
-            return _die(f"{path.relative_to(ROOT)} already exists — edit it, "
+            return _die(f"{path.relative_to(ROOT)} already exists. Edit it, "
                         f"or pass a different --slug")
     else:
         pre = prefix()
@@ -541,7 +541,7 @@ def cmd_add(args) -> int:
         body = "TODO: what was observed, what it means, and what to do about it."
 
     # The length and overlap gates exist to keep atomic notes atomic. A
-    # reference doc is the sanctioned way to be long, so neither applies —
+    # reference doc is the sanctioned way to be long, so neither applies,
     # but it must carry a summary, because that is all a search will show.
     if is_doc:
         if not args.summary and not args.force:
@@ -565,7 +565,7 @@ def cmd_add(args) -> int:
             f"unfindable. Split it and link the halves, or re-run with -f."
         )
 
-    # threshold=0 so the closest match can be reported even when it passes —
+    # threshold=0 so the closest match can be reported even when it passes,
     # seeing "31%" is how an author learns where the line is.
     scored = similar_notes(args.title, body, all_notes(), threshold=0.0)
     over = [(s, n) for s, n in scored if s >= DUP_THRESHOLD]
@@ -575,7 +575,7 @@ def cmd_add(args) -> int:
             f"overlap with existing notes is {over[0][0]:.0%}; the limit is "
             f"{DUP_THRESHOLD:.0%}. Closest:\n" + "\n".join(lines) +
             "\n\nDecide which this is:\n"
-            "  - the same finding      -> extend that note, or `kb.py discuss` it\n"
+            "  - the same finding      -> extend that note, or `grumpy discuss` it\n"
             "  - a follow-on           -> add it there as a Discussion entry\n"
             "  - genuinely separate    -> re-run with -f, then put the other\n"
             "                             note's id in this one's links: field"
@@ -637,7 +637,7 @@ def cmd_tags(args) -> int:
         c = counts.get(slug, 0)
         desc = tags[slug]["desc"]
         print("  " * depth + f"- {slug}" + (f" ({c})" if c else "") +
-              (f"  — {desc}" if desc else ""))
+              (f"  - {desc}" if desc else ""))
         for child in sorted(s for s, m in tags.items() if m["parent"] == slug):
             show(child, depth + 1)
 
@@ -655,13 +655,13 @@ STARTER_TAGS = """\
 # Tag tree
 
 Slugs are globally unique and are what notes reference. Position in this tree is
-metadata about the slug, not part of its identity — moving a line re-parents a
+metadata about the slug, not part of its identity, so moving a line re-parents a
 tag without touching a single note.
 
 A search for a parent tag also matches everything beneath it. Query the leaves.
 
 Keep this small. Before adding a slug, check whether an existing one already
-carries the meaning — a tag used once is noise. Repos are **not** tags; they
+carries the meaning. A tag used once is noise. Repos are **not** tags; they
 live in each note's `repos:` field so the two axes stay independent.
 
 Everything above the first list item is preserved when the CLI rewrites this
@@ -670,10 +670,10 @@ file, so edit this prose freely.
 ## Choosing a kind
 
 The test: *if a different person had done this same work, would the note read
-the same?* Always the same means the system simply is that way — `architecture`,
+the same?* Always the same means the system simply is that way: `architecture`,
 or `known-issue` where the behaviour contradicts the project's own docs.
-Possibly different means someone chose — `decision`, and it must be able to name
-the alternatives it rejected. Reproducible by following it — `runbook`.
+Possibly different means someone chose: `decision`, and it must be able to name
+the alternatives it rejected. Reproducible by following it: `runbook`.
 
 - area: which part of the system it touches
   - EDITME: replace these with your own areas
@@ -685,7 +685,7 @@ the alternatives it rejected. Reproducible by following it — `runbook`.
   - architecture: a fact about how the system is built, decided upstream
   - decision: a choice we made where another team would reasonably differ
   - known-issue: a defect that breaks a promise the project's own docs make
-  - reference: too large for one claim — a map you consult, lives in docs/
+  - reference: too large for one claim; a map you consult, lives in docs/
   - runbook: an executable procedure, with a way to check it worked
   - task: open work. `status: open` until done
 """
@@ -705,18 +705,18 @@ the failure mode this exists to prevent.
 
 ## Commands
 
-Run from `{root}`. Stdlib Python only — nothing to install.
+Run from `{root}`. Stdlib Python only, nothing to install.
 
 ```bash
-./kb.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]]
-./kb.py issues [--severity S] [--repo R]
-./kb.py read <id> [--context] [--section NAME] [--full]
-./kb.py add --title T --kind K [--tags a,b] [--repos x,y] [--stdin]
-./kb.py tags [--add SLUG --parent P] [--move SLUG --parent P]
-./kb.py discuss <id> -m "..."
+./grumpy.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]]
+./grumpy.py issues [--severity S] [--repo R]
+./grumpy.py read <id> [--context] [--section NAME] [--full]
+./grumpy.py add --title T --kind K [--tags a,b] [--repos x,y] [--stdin]
+./grumpy.py tags [--add SLUG --parent P] [--move SLUG --parent P]
+./grumpy.py discuss <id> -m "..."
 ```
 
-Notes are atomic — one claim, capped at {cap} characters. Reference docs in
+Notes are atomic: one claim, capped at {cap} characters. Reference docs in
 `docs/` are the sanctioned way to be long and are read a section at a time.
 `add` refuses an unknown tag, an over-length body, or more than {dup:.0%} overlap
 with an existing note; `-f` clears all three.
@@ -724,18 +724,18 @@ with an existing note; `-f` clears all three.
 ## Start here
 
 ```bash
-./kb.py search --kind architecture
-./kb.py issues
-./kb.py search --kind task --status open
+./grumpy.py search --kind architecture
+./grumpy.py issues
+./grumpy.py search --kind task --status open
 ```
 
 ## Writing a note
 
 Say what you verified and what you inferred. Cite `file:line` or the command
-you ran. One claim per note — if it needs "and also", it is two notes. Do not
+you ran. One claim per note. If it needs "and also", it is two notes. Do not
 invent tags; `tags.md` explains the vocabulary.
 
-Run `python3 -m unittest test_kb` afterwards: the last group checks that every
+Run `python3 -m unittest test_grumpy` afterwards: the last group checks that every
 tag resolves and every `[[{prefix}-NNNN]]` link points at something real.
 """
 
@@ -743,30 +743,30 @@ tag resolves and every `[[{prefix}-NNNN]]` link points at something real.
 def cmd_init(args) -> int:
     """Scaffold a new knowledge base somewhere else.
 
-    The engine — kb.py and test_kb.py — is copied verbatim; nothing in it names
-    a project. Everything that does lives in kb.conf and the content, which is
+    The engine - grumpy.py and test_grumpy.py - is copied verbatim; nothing in it names
+    a project. Everything that does lives in grumpy.conf and the content, which is
     what makes the same code serve any number of bases.
     """
     import shutil
 
     dest = Path(args.dest).expanduser().resolve()
     if dest.exists() and any(dest.iterdir()) and not args.force:
-        return _die(f"{dest} exists and is not empty — pass --force to add to it")
+        return _die(f"{dest} exists and is not empty - pass --force to add to it")
     (dest / "notes").mkdir(parents=True, exist_ok=True)
     (dest / "docs").mkdir(exist_ok=True)
 
     name = args.name or dest.name
     pre = args.prefix or "".join(w[0] for w in re.split(r"[^a-z0-9]+", name.lower())
-                                 if w)[:3] or "kb"
+                                 if w)[:3] or "n"
 
-    for f in ("kb.py", "test_kb.py"):
+    for f in ("grumpy.py", "test_grumpy.py"):
         src = ROOT / f
         if src.exists():
             shutil.copy(src, dest / f)
-    (dest / "kb.py").chmod(0o755)
+    (dest / "grumpy.py").chmod(0o755)
 
-    (dest / "kb.conf").write_text(
-        "# Instance configuration. The engine (kb.py, test_kb.py) is\n"
+    (dest / "grumpy.conf").write_text(
+        "# Instance configuration. The engine (grumpy.py, test_grumpy.py) is\n"
         "# project-agnostic; everything naming this project lives here.\n"
         f"prefix = {pre}\nname = {name}\ntitle = {args.title or name}\n",
         encoding="utf-8")
@@ -778,16 +778,16 @@ def cmd_init(args) -> int:
         description=args.description or
         f"Search the {name} knowledge base before grepping the codebase, and "
         f"record what you learn. EDITME: name the repos and the failure modes "
-        f"this should trigger on — a vague description never fires.",
+        f"this should trigger on, because a vague description never fires.",
         blurb=args.title or f"Knowledge base for {name}.",
         root=dest, cap=MAX_BODY, dup=DUP_THRESHOLD, prefix=pre), encoding="utf-8")
 
     print(f"created {dest}")
     print(f"  prefix: {pre}-0001, {pre}-0002, ...")
     print("\nNext:")
-    print("  1. edit tags.md      — replace the EDITME area branch")
-    print("  2. edit SKILL.md     — the description decides whether it ever fires")
-    print(f"  3. cd {dest} && ./kb.py add --title ... --kind architecture")
+    print("  1. edit tags.md      - replace the EDITME area branch")
+    print("  2. edit SKILL.md     - the description decides whether it ever fires")
+    print(f"  3. cd {dest} && ./grumpy.py add --title ... --kind architecture")
     print(f"  4. ln -s {dest} ~/.claude/skills/{name}")
     return 0
 
@@ -829,7 +829,7 @@ def cmd_issues(args) -> int:
         nbrs = sorted(graph.get(n["id"], ()))
         if nbrs:
             print(f"           -> {' '.join(nbrs)}")
-    print(f"\n{len(rows)} issue(s).  ./kb.py read <id> --context  for one with "
+    print(f"\n{len(rows)} issue(s).  ./grumpy.py read <id> --context  for one with "
           f"its decisions and tasks")
     return 0
 
@@ -869,7 +869,7 @@ def cmd_read(args) -> int:
     print(f"\n{len(parts)} section(s):")
     for name, text in parts:
         print(f"  {len(text.splitlines()):4} lines  {name}")
-    print(f"\n./kb.py read {e['id']} --section \"<name>\"   |   --full for all of it")
+    print(f"\n./grumpy.py read {e['id']} --section \"<name>\"   |   --full for all of it")
     if args.context:
         _print_context(e)
     return 0
@@ -878,7 +878,7 @@ def cmd_read(args) -> int:
 def _print_context(e: dict) -> None:
     """The neighbourhood of one entry, one line each.
 
-    Reading a defect on its own leaves the obvious questions unanswered — was a
+    Reading a defect on its own leaves the obvious questions unanswered - was a
     decision forced by it, is anyone assigned, which runbook works around it.
     Those live in linked entries, and opening five files to find out is enough
     friction that nobody does.
@@ -894,7 +894,7 @@ def _print_context(e: dict) -> None:
         n = by_id[nid]
         flag = "" if n["status"] == "open" else f" [{n['status']}]"
         print(f"  {n['kind']:<12} {nid}  {n['title']}{flag}")
-    print(f"\n  ./kb.py read <id>   |   ./kb.py search --expand for the full sweep")
+    print(f"\n  ./grumpy.py read <id>   |   ./grumpy.py search --expand for the full sweep")
 
 
 def cmd_discuss(args) -> int:
@@ -925,7 +925,7 @@ def _die(msg: str) -> int:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(prog="kb", description=__doc__,
+    p = argparse.ArgumentParser(prog="grumpy", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -973,7 +973,7 @@ def main() -> int:
     r0.add_argument("--section", help="substring of a section name")
     r0.add_argument("--full", action="store_true", help="print the whole doc")
     r0.add_argument("--context", action="store_true",
-                    help="also list what links to it — decisions, tasks, runbooks")
+                    help="also list what links to it - decisions, tasks, runbooks")
     r0.set_defaults(fn=cmd_read)
 
     n0 = sub.add_parser("init", help="scaffold a new knowledge base elsewhere")

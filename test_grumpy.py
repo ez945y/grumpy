@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for kb.py. Stdlib only:  python3 -m unittest -v
+"""Tests for grumpy.py. Stdlib only:  python3 -m unittest -v
 
 Unit tests import kb and repoint its module-level paths at a temp directory.
 End-to-end tests copy kb.py into a throwaway workspace and drive it as a
@@ -21,7 +21,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import kb  # noqa: E402
+import grumpy as kb  # noqa: E402
 
 
 TAGS_FIXTURE = """\
@@ -55,13 +55,13 @@ class TempWorkspace(unittest.TestCase):
         self.tags = self.tmp / "tags.md"
         self.tags.write_text(TAGS_FIXTURE, encoding="utf-8")
 
-        (self.tmp / "kb.conf").write_text("prefix = tn\n", encoding="utf-8")
+        (self.tmp / "grumpy.conf").write_text("prefix = tn\n", encoding="utf-8")
 
         self._saved = (kb.ROOT, kb.NOTES, kb.DOCS, kb.TAGS_FILE,
                        kb.CONF_FILE, kb.INDEX)
         kb.ROOT, kb.NOTES, kb.TAGS_FILE = self.tmp, self.notes, self.tags
         kb.DOCS = self.tmp / "docs"
-        kb.CONF_FILE = self.tmp / "kb.conf"
+        kb.CONF_FILE = self.tmp / "grumpy.conf"
         kb.INDEX = self.tmp / ".index.db"
         self.addCleanup(self._restore)
 
@@ -71,7 +71,7 @@ class TempWorkspace(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Unit — note parsing
+# Unit - note parsing
 # ---------------------------------------------------------------------------
 
 class TestParseNote(TempWorkspace):
@@ -89,7 +89,7 @@ class TestParseNote(TempWorkspace):
 
     def test_title_may_contain_colons(self):
         """partition() keeps everything after the first colon, so prose in a
-        title survives — this is the common case for issue-shaped titles."""
+        title survives - this is the common case for issue-shaped titles."""
         p = write_note(self.notes, "tn-0002-x.md", "id: tn-0002\ntitle: gateway: exits 1")
         self.assertEqual(kb.parse_note(p)["title"], "gateway: exits 1")
 
@@ -115,7 +115,7 @@ class TestParseNote(TempWorkspace):
 
 
 # ---------------------------------------------------------------------------
-# Unit — tag tree
+# Unit - tag tree
 # ---------------------------------------------------------------------------
 
 class TestTagTree(TempWorkspace):
@@ -176,7 +176,7 @@ class TestTagTree(TempWorkspace):
 
 
 # ---------------------------------------------------------------------------
-# Unit — link graph
+# Unit - link graph
 # ---------------------------------------------------------------------------
 
 class TestLinkGraph(TempWorkspace):
@@ -188,7 +188,7 @@ class TestLinkGraph(TempWorkspace):
 
     def test_edges_are_symmetric(self):
         """A note cites what it depends on, but a reader landing on the target
-        needs to find the citer — so reading is always two-way."""
+        needs to find the citer - so reading is always two-way."""
         g = self._graph(("tn-0001", "tn-0002", "b"), ("tn-0002", "", "b"))
         self.assertEqual(g["tn-0001"], {"tn-0002"})
         self.assertEqual(g["tn-0002"], {"tn-0001"})
@@ -225,7 +225,7 @@ class TestLinkGraph(TempWorkspace):
 
 
 # ---------------------------------------------------------------------------
-# Unit — near-duplicate detection
+# Unit - near-duplicate detection
 # ---------------------------------------------------------------------------
 
 class TestSimilarity(TempWorkspace):
@@ -265,7 +265,7 @@ class TestSimilarity(TempWorkspace):
 
 
 # ---------------------------------------------------------------------------
-# Unit — index freshness
+# Unit - index freshness
 # ---------------------------------------------------------------------------
 
 class TestIndex(TempWorkspace):
@@ -287,20 +287,20 @@ class TestIndex(TempWorkspace):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end — drive the CLI as a subprocess
+# End-to-end - drive the CLI as a subprocess
 # ---------------------------------------------------------------------------
 
 class TestCLI(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        shutil.copy(HERE / "kb.py", self.tmp / "kb.py")
-        (self.tmp / "kb.conf").write_text("prefix = tn\n", encoding="utf-8")
+        shutil.copy(HERE / "grumpy.py", self.tmp / "grumpy.py")
+        (self.tmp / "grumpy.conf").write_text("prefix = tn\n", encoding="utf-8")
         (self.tmp / "notes").mkdir()
         (self.tmp / "tags.md").write_text(TAGS_FIXTURE, encoding="utf-8")
 
     def kb(self, *args: str, expect: int = 0, stdin: str = "") -> str:
-        r = subprocess.run([sys.executable, "kb.py", *args], cwd=self.tmp,
+        r = subprocess.run([sys.executable, "grumpy.py", *args], cwd=self.tmp,
                            capture_output=True, text=True, input=stdin)
         self.assertEqual(r.returncode, expect,
                          f"args={args}\nstdout={r.stdout}\nstderr={r.stderr}")
@@ -411,7 +411,7 @@ class TestCLI(unittest.TestCase):
         self.assertIn("tn-0001", self.kb("search", "anifes"))
 
     def test_fts_still_wins_when_it_matches(self):
-        """The fallback must not fire when FTS already answered — otherwise
+        """The fallback must not fire when FTS already answered - otherwise
         stemming and ranking are lost."""
         self._seed()
         out = self.kb("search", "manifest")
@@ -688,7 +688,7 @@ class TestCLI(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end — the real knowledge base in this repo
+# End-to-end - the real knowledge base in this repo
 # ---------------------------------------------------------------------------
 
 class TestRealContent(unittest.TestCase):
@@ -696,7 +696,7 @@ class TestRealContent(unittest.TestCase):
 
     def setUp(self) -> None:
         importlib.reload(kb)
-        # The engine ships without content — a bare checkout has no tags.md,
+        # The engine ships without content - a bare checkout has no tags.md,
         # no notes/ and no SKILL.md. These are instance invariants, so they
         # skip rather than fail there; the engine's own suite stays green.
         if not kb.TAGS_FILE.exists():
@@ -759,7 +759,7 @@ class TestRealContent(unittest.TestCase):
 
     def test_open_tasks_are_findable_as_a_worklist(self):
         """`--kind task --status open` is the "what now?" view. A base with no
-        tasks yet is a legitimate state — a freshly scaffolded one — so this
+        tasks yet is a legitimate state - a freshly scaffolded one - so this
         only asserts that any task present is reachable through that filter."""
         notes = kb.all_notes()
         if not notes:
@@ -782,7 +782,7 @@ class TestRealContent(unittest.TestCase):
         """The cap is enforced at write time; this keeps hand edits honest."""
         for n in kb.all_notes():
             self.assertLessEqual(len(n["body"]), kb.MAX_BODY,
-                                 f"{n['id']} is {len(n['body'])} chars — split it")
+                                 f"{n['id']} is {len(n['body'])} chars - split it")
 
     def test_no_two_notes_are_near_duplicates(self):
         notes = kb.all_notes()
@@ -820,15 +820,15 @@ class TestIssuesAndContext(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        shutil.copy(HERE / "kb.py", self.tmp / "kb.py")
-        (self.tmp / "kb.conf").write_text("prefix = tn\n", encoding="utf-8")
+        shutil.copy(HERE / "grumpy.py", self.tmp / "grumpy.py")
+        (self.tmp / "grumpy.conf").write_text("prefix = tn\n", encoding="utf-8")
         (self.tmp / "notes").mkdir()
         (self.tmp / "tags.md").write_text(
             "- kind\n  - known-issue\n  - decision\n  - task\n"
             "- severity\n  - blocker\n  - major\n  - minor\n", encoding="utf-8")
 
     def kb(self, *args, expect=0):
-        r = subprocess.run([sys.executable, "kb.py", *args], cwd=self.tmp,
+        r = subprocess.run([sys.executable, "grumpy.py", *args], cwd=self.tmp,
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, expect, r.stdout + r.stderr)
         return r.stdout + r.stderr
@@ -923,10 +923,10 @@ class TestSkillFile(unittest.TestCase):
 
     def test_name_matches_the_instance(self):
         """A skill is loaded from a directory named after it, so the two must
-        agree. kb.conf is the authority when it names one."""
+        agree. grumpy.conf is the authority when it names one."""
         end = self.text.find("\n---\n", 4)
         name = re.search(r"(?m)^name:\s*(\S+)", self.text[4:end]).group(1)
-        self.assertEqual(name, kb.conf().get("name", HERE.name))
+        self.assertEqual(name, kb.conf().get("name") or HERE.name)
 
     def test_description_is_specific_enough_to_trigger(self):
         """A vague description is why a skill never fires. This cannot check
@@ -935,14 +935,14 @@ class TestSkillFile(unittest.TestCase):
         end = self.text.find("\n---\n", 4)
         desc = re.search(r"(?m)^description:\s*(.+)", self.text[4:end]).group(1)
         if "EDITME" in desc:
-            self.skipTest("SKILL.md is still the scaffold — fill in description")
+            self.skipTest("SKILL.md is still the scaffold - fill in description")
         self.assertGreater(len(desc), 120, "description is too vague to trigger")
         self.assertGreater(len(desc.split()), 20,
                            "name the repos and failure modes it should fire on")
 
     def test_documents_every_command_the_cli_exposes(self):
         for verb in ("search", "add", "tags", "discuss"):
-            self.assertIn(f"kb.py {verb}", self.text, f"{verb} is undocumented")
+            self.assertIn(f"grumpy.py {verb}", self.text, f"{verb} is undocumented")
 
 
 if __name__ == "__main__":

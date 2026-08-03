@@ -1,126 +1,138 @@
-# kb
+# grumpy
 
-A file-backed knowledge base with a searchable link graph, for the things a
-codebase does not tell you about itself.
+**English** · [繁體中文](README.zh-TW.md)
 
-## The problem
+A knowledge base that argues with you before it lets you write anything down.
 
-Large systems live in many repositories. An agent can read all of them — and
+Two files. No dependencies. No server, no embeddings, no vector database.
+Python 3.11+ and the standard library.
+
+## Why it says no
+
+Most tools for agent memory optimise for capture: make it easy to save
+something, worry about the mess later. That mess is the whole problem. After a
+month you have four versions of one fact, none of them dated, and no way to
+tell which is current. Loading it costs more than the answer is worth.
+
+grumpy refuses instead. Every write has to get past three gates:
+
+| Gate | Limit | Why |
+|------|-------|-----|
+| Unknown tag | must already be in the tag tree | a vocabulary that grows without limit stops being a vocabulary |
+| Body length | 2000 characters | a longer note holds two claims, and the second one becomes unfindable |
+| Overlap with an existing note | 60% | two copies of a fact drift apart, and then nobody knows which is right |
+
+Each refusal shows you what it found and why, so you can extend the existing
+note instead. `-f` overrides all three when you really do mean it.
+
+That is the entire pitch. Everything else follows from wanting recall to stay
+cheap.
+
+## The problem it was built for
+
+Large systems live in many repositories. An agent can read all of them, and
 that is exactly the problem, because it reads them again every session. The
 same afternoon of digging repeats: which repo owns this, why does that build
 fail from a clean checkout, what did we decide about it and why. Nothing
 learned survives the context it was learned in.
 
-The usual answers do not hold. A memory file grows until loading it costs more
-than the answer is worth. A README describes what the project intended, not
-what it actually does on your machine. Both force the same bad trade: load
-everything, or find nothing.
+A growing memory file does not fix this, and neither does a README, because
+both force the same trade: load everything, or find nothing.
 
-What is wanted is closer to recall than to reading — the flash of remembering
-the one thing that matters right now, and nothing else. Our cells are replaced
-continuously and we never notice it happening; what persists is not the
-material but the pattern. An agent's context turns over the same way. This is
-an attempt at the pattern that outlives it, so one agent can hand off to the
-next without either of them re-deriving what was already known.
+What is wanted is closer to recall than to reading. The one thing that matters
+right now, and nothing else. Our cells are replaced continuously and we never
+notice it happening; what persists is not the material but the pattern. An
+agent's context turns over the same way. This is an attempt at the pattern that
+outlives it, so one agent can hand off to the next without either of them
+re-deriving what was already known.
 
-## What follows from that
+## Light on context by design
 
-Every decision here comes from wanting recall to be cheap:
-
-- **Atomic notes, capped at 2000 characters.** A search hit should *be* the
-  answer, not a document to skim. A longer note carries two claims and the
-  second becomes unfindable — nobody searches for something buried in
-  paragraph six.
-- **Longer things are a different kind.** A map or a table is `reference`,
-  lives in `docs/`, is uncapped, and is read a section at a time. Search shows
-  its summary and its section names and never its body, so an outline costs a
-  few lines and you pull only the part you need.
+- **Atomic notes.** A search hit should *be* the answer, not a document to
+  skim.
+- **Big things are a separate kind.** A map or a table is `reference`, lives in
+  `docs/`, and is read a section at a time. Search shows its summary and its
+  section names, never its body, so an outline costs a few lines and you pull
+  only the part you need.
 - **Links are symmetric.** A note cites what it depends on; whoever lands on
   the cited note needs to find the citer. One hit leads to the rest of the
   topic instead of dead-ending.
-- **Near-duplicates are refused.** Two copies of one finding drift, and then
-  nobody can tell which is current. `add` measures overlap and stops with the
-  candidates listed so you can decide.
-- **Tags are a tree, referenced by slug.** Re-parenting is a one-line edit that
-  touches no note. The tree stays small because `add` refuses slugs that are
-  not in it.
 - **Settled entries disappear.** A fixed defect is history, and history crowds
-  out what still bites. Search says how many it hid.
+  out what still bites. Search tells you how many it hid.
+- **Tags are a tree, referenced by slug.** Re-parenting one is a single line
+  edit that touches no note.
 
-No dependencies, no server, no embeddings, no vector store. Python 3.11+ and
-the standard library. Two files.
-
-## Start a knowledge base
-
-```bash
-git clone <this repo> kb-engine
-./kb-engine/kb.py init ~/my-project-kb --name my-project-kb \
-    --title "My project knowledge base"
-```
-
-That copies the engine, writes an instance config, a starter tag tree, and a
-`SKILL.md` for agent runtimes that load skills. Then edit two things — the
-`area` branch of `tags.md`, and the `description` in `SKILL.md`, which decides
-whether the skill ever fires — and start writing.
-
-## Use it
+## Start
 
 ```bash
-./kb.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]]
-./kb.py issues [--severity S] [--repo R]        # open defects, worst first
-./kb.py read <id> [--context] [--section NAME] [--full]
-./kb.py add --title T --kind K [--tags a,b] [--repos x,y] [--stdin]
-./kb.py tags [--add SLUG --parent P] [--move SLUG --parent P]
-./kb.py discuss <id> -m "..."
-./kb.py init <dir>
+git clone <this repo> grumpy
+./grumpy/grumpy.py init ~/my-project-notes --name my-project-notes \
+    --title "My project notes"
 ```
 
-`read --context` is the one to reach for on a defect: the note, plus everything
-linked to it listed by kind. A defect alone leaves the obvious questions open —
-was a decision forced by it, is anyone assigned, which runbook routes around it
-— and opening five files to answer them is enough friction that nobody does.
+That copies the engine, writes an instance config with its own note id prefix,
+a starter tag tree, and a `SKILL.md` for agent runtimes that load skills. Then
+edit two things: the `area` branch of `tags.md`, and the `description` in
+`SKILL.md`, which is what decides whether the skill ever fires.
+
+## Use
+
+```bash
+./grumpy.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]]
+./grumpy.py issues [--severity S] [--repo R]      # open defects, worst first
+./grumpy.py read <id> [--context] [--section NAME] [--full]
+./grumpy.py add --title T --kind K [--tags a,b] [--repos x,y] [--stdin]
+./grumpy.py tags [--add SLUG --parent P] [--move SLUG --parent P]
+./grumpy.py discuss <id> -m "..."
+./grumpy.py init <dir>
+```
+
+`read --context` is the one to reach for on a defect. It gives you the note
+plus everything linked to it, listed by kind. A defect on its own leaves the
+obvious questions open (was a decision forced by it, is anyone assigned, which
+runbook routes around it) and opening five files to answer them is enough
+friction that nobody does.
 
 Six kinds: `architecture`, `known-issue`, `decision`, `runbook`, `reference`,
-`task`. The test for choosing one — *if a different person had done this same
+`task`. The test for choosing one: *if a different person had done this same
 work, would the note read the same?* Always the same means the system simply is
-that way. Possibly different means someone chose, and the note must be able to
-name the alternatives it rejected.
+that way. Possibly different means someone chose, and the note has to be able
+to name the alternatives it rejected.
 
-Notes are markdown with a small frontmatter block. Search is SQLite FTS5,
-rebuilt automatically when a file changes. Everything stays readable with `cat`
-and editable in any editor — the CLI is a convenience, never a requirement.
-
-Search is bilingual: FTS5 handles English with stemming and ranking, and
+Search is bilingual. FTS5 handles English with stemming and ranking, and
 because its tokeniser treats an unbroken run of CJK as a single token, a query
 FTS cannot answer falls back to a substring scan.
+
+Notes are markdown with a small frontmatter block. Everything stays readable
+with `cat` and editable in any editor. The CLI is a convenience, never a
+requirement.
 
 ## Layout
 
 ```
-kb.py        the engine — knows nothing about any particular project
-test_kb.py   107 tests
-kb.conf      instance config: id prefix, name, title
-tags.md      the tag tree, and the conventions it enforces
-SKILL.md     entry point for agent runtimes
-notes/       atomic notes
-docs/        reference documents
+grumpy.py        the engine, which knows nothing about any particular project
+test_grumpy.py   107 tests
+grumpy.conf      instance config: note id prefix, name, title
+tags.md          the tag tree, and the conventions it enforces
+SKILL.md         entry point for agent runtimes
+notes/           atomic notes
+docs/            reference documents
 ```
 
-`kb.py` and `test_kb.py` carry no project information; that is what lets one
-engine serve any number of bases. Everything else in an instance is content.
+The two engine files carry no project information, which is what lets one copy
+serve any number of knowledge bases. Everything else in an instance is content.
 
-## Writing notes worth keeping
+## Notes worth keeping
 
-The failure mode is not too few notes. It is notes nobody can trust. Two rules
-carry most of the weight:
+The failure mode is not too few notes. It is notes nobody can trust.
 
-**Cite what you checked** — `file.go:123`, or the command and its output. A
-claim nobody can re-verify gets trusted blindly, and is eventually wrong.
+**Cite what you checked**: `file.go:123`, or the command and its output. A claim
+nobody can re-verify gets trusted blindly, and is eventually wrong.
 
 **Separate observed from inferred.** "I read this in the source" and "I ran this
-and saw that" are different confidence levels; say which one it is. A confident
-note that turns out to be false is worse than no note, because the next reader
-will not re-check it.
+and saw that" are different confidence levels, so say which one it is. A
+confident note that turns out to be false is worse than no note, because the
+next reader will not re-check it.
 
 Skip anything a `git log` or a glance at the file would have told you. The value
 is entirely in what cost time to work out.
@@ -128,13 +140,13 @@ is entirely in what cost time to work out.
 ## Tests
 
 ```bash
-python3 -m unittest test_kb -v
+python3 -m unittest test_grumpy -v
 ```
 
 Unit tests cover frontmatter parsing, the tag tree, the link graph and its
 traversal, section splitting, near-duplicate detection and index freshness.
 End-to-end tests drive the CLI as a subprocess. A final group validates whatever
-content sits beside it — every tag resolves, every wiki link points at something
+content sits beside it: every tag resolves, every wiki link points at something
 real, ids are unique and match their filenames, no entry document cites a note
 that was deleted. Those skip cleanly on a bare engine or a freshly scaffolded
 base, so both are green out of the box.
