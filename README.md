@@ -2,35 +2,29 @@
 
 **English** · [繁體中文](README.zh-TW.md)
 
-A small knowledge base for the things a project never writes down.
+A small knowledge base for what falls between repositories.
 
 Two files, plain Python, nothing to install. Notes are ordinary text files you
 can open in any editor.
 
 ## Why
 
-When an AI assistant works on a large codebase, it works the same things out
-over and over: which part owns what, why a build fails on a fresh copy, what
-was decided about it and why. None of that survives into the next conversation.
+Anything that spans several repositories has nowhere to live. No single README
+owns it, so it gets worked out again by whoever asks next.
 
-The usual fix is one growing notes file. That works until it gets long enough
-that reading it costs more than the answer was worth.
+One growing notes file is the usual answer. It fails the same way every time:
+eventually reading it costs more than the answer.
 
-grumpy keeps itself small:
+grumpy stays small:
 
-- **One note answers one question.** Notes are limited to about half a page, so
-  a search result is the answer rather than something to read through.
-- **Bigger things are kept apart.** A map of how the pieces fit together lives
-  in `docs/` and is read one section at a time. A search shows you its contents
-  page, not the whole thing.
-- **Anything marked resolved stops showing up**, and it tells you how many it
-  hid.
-- **Notes point at each other in both directions**, so finding one leads you to
-  the rest of the story.
+- One note, one question, about half a page.
+- Maps and tables live apart in `docs/`, read a section at a time.
+- Resolved things stop showing up.
+- Notes point at each other both ways, so one leads to the rest.
 
-It is called grumpy because it turns writes down. If a note repeats one you
-already have, runs too long, or uses a label invented on the spot, it stops and
-shows you what it found. Add `-f` if you meant it.
+It is called grumpy because it turns writes down that would undo this: a
+duplicate, an over-long note, a label invented on the spot. It says what it
+found. Add `-f` if you meant it.
 
 ## Start
 
