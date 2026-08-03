@@ -10,7 +10,7 @@ can open in any editor.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/downloads/) 
 </br>
-**English** · [繁體中文](README.zh-TW.md) · [Why](#why) · [Quick Start](#quick-start) · [Use](#use) · [For developers](#for-developers)
+[繁體中文](README.zh-TW.md) · [Why](#why) · [Quick Start](#quick-start) · [Use](#use) · [For developers](#for-developers)
 
 </br>
 <img width="558" height="439" alt="image" src="https://github.com/user-attachments/assets/78f20453-c16d-4b68-b7d8-8c857591142b" />

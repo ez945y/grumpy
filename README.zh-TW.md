@@ -1,10 +1,19 @@
-# grumpy
+<div align="center">
 
-[English](README.md) · **繁體中文**
+<h1>Grumpy</h1>
 
-一個小型知識庫，放那些落在多個 repo 之間的東西。
+Make it quick! 一個小型知識庫，放那些落在多個 repo 之間的東西。
 
 兩個檔案，純 Python，不用安裝任何東西。筆記就是純文字檔，任何編輯器都打得開。
+
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/downloads/) 
+</br>
+[English](README.md) · [Why](#why) · [Quick Start](#quick-start) · [Use](#use) · [For developers](#for-developers)
+
+</br>
+<img width="558" height="439" alt="image" src="https://github.com/user-attachments/assets/78f20453-c16d-4b68-b7d8-8c857591142b" />
+</div>
 
 ## 為什麼
 
