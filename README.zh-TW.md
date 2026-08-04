@@ -97,3 +97,7 @@ python3 -m unittest test_grumpy -v      # 107 個測試
 
 寫下你實際查證過的東西，並且註明是讀到的還是跑過的，那是不同程度的把握。
 凡是翻一下版本紀錄就會知道的，略過。
+
+## 授權
+
+MIT，見 [LICENSE](LICENSE)。

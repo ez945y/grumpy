@@ -19,6 +19,7 @@ import datetime as _dt
 import json
 import os
 import re
+import secrets
 import sqlite3
 import sys
 import textwrap
@@ -80,7 +81,63 @@ def prefix() -> str:
 
 
 def wikilink_re() -> re.Pattern:
-    return re.compile(rf"\[\[({re.escape(prefix())}-\d+)\]\]")
+    # Deliberately `[0-9a-z]+`, not `\d+`: ids minted before 2026-08-04 are
+    # zero-padded counters (n-0003) and ids minted after are base32 tokens
+    # (n-0a7k9m). Both must resolve forever, so the pattern only ever widens.
+    return re.compile(rf"\[\[({re.escape(prefix())}-[0-9a-z]+)\]\]")
+
+
+# Crockford-style base32: no i/l/o/u, so an id is safe to read aloud and to
+# retype from a screenshot without the 1/l and 0/O confusions.
+ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
+ID_EPOCH = _dt.date(2026, 1, 1)
+
+
+def _b32(n: int, width: int) -> str:
+    out = []
+    for _ in range(width):
+        n, r = divmod(n, 32)
+        out.append(ID_ALPHABET[r])
+    return "".join(reversed(out))
+
+
+def mint_id(pre: str, today: _dt.date | None = None) -> str:
+    """A note id that needs no coordination to be unique.
+
+    Three chars of day-since-epoch (sortable, good for ~89 years) followed by
+    five random chars. The counter it replaces was `max(local files) + 1`,
+    which is derived purely from the working tree: two people who both hold
+    n-0038 as their maximum both mint n-0039, their filenames differ because
+    their slugs differ, and git therefore merges both without a conflict. The
+    duplicate is silent until someone runs the test suite.
+
+    This never reads the notes directory, which is the property that matters:
+    two clones offline from each other cannot agree on a wrong answer.
+
+    Five random chars, not three: the random part only has to separate notes
+    minted on the *same day*, but 32**3 is 32768, which by the birthday bound
+    is a coin flip somewhere around 180 notes in a day. 32**5 is 33.5M, which
+    puts a realistic team's daily output back into the noise.
+    """
+    day = ((today or _dt.date.today()) - ID_EPOCH).days
+    rand = "".join(secrets.choice(ID_ALPHABET) for _ in range(5))
+    return f"{pre}-{_b32(max(day, 0), 3)}{rand}"
+
+
+def duplicate_ids() -> dict:
+    """Ids held by more than one note file, as {id: [paths]}.
+
+    Minting cannot collide, but a merge can still land two notes that were
+    numbered under the old counter, and `-f` can force anything. Callers that
+    write or index check this so the clash surfaces at the next command rather
+    than whenever someone next runs the tests.
+    """
+    by_id: dict = {}
+    for p in sorted(NOTES.glob("*.md")):
+        m = re.match(rf"({re.escape(prefix())}-[0-9a-z]+)-", p.name)
+        if m:
+            by_id.setdefault(m.group(1), []).append(p)
+    return {k: v for k, v in by_id.items() if len(v) > 1}
 
 
 # ---------------------------------------------------------------------------
@@ -577,9 +634,17 @@ def cmd_add(args) -> int:
                         f"or pass a different --slug")
     else:
         pre = prefix()
-        existing = [int(m.group(1)) for p in NOTES.glob(f"{pre}-*.md")
-                    if (m := re.match(rf"{re.escape(pre)}-(\d+)", p.name))]
-        nid = f"{pre}-{max(existing, default=0) + 1:04d}"
+        taken = {m.group(1) for p in NOTES.glob(f"{pre}-*.md")
+                 if (m := re.match(rf"({re.escape(pre)}-[0-9a-z]+)-", p.name))}
+        # Minting is coordination-free, so this loop is a belt-and-braces check
+        # against the local tree, not the mechanism that makes ids unique.
+        for _ in range(50):
+            nid = mint_id(pre)
+            if nid not in taken:
+                break
+        else:
+            return _die("could not mint a free note id after 50 tries — run "
+                        "`grumpy reindex` and check notes/ for damage")
         path = NOTES / f"{nid}-{slug}.md"
 
     # Read the body from a pipe automatically: an agent almost always heredocs
@@ -1064,8 +1129,21 @@ def cmd_discuss(args) -> int:
 
 
 def cmd_reindex(_args) -> int:
+    # Checked here because reindex is what runs right after a pull, which is
+    # exactly when a merge would have landed two notes sharing one id. Two
+    # files, different slugs, no git conflict: the clash is otherwise silent
+    # until someone happens to run the test suite.
+    dupes = duplicate_ids()
     build_index(force=True)
     print(f"indexed {len(all_notes())} note(s)")
+    if dupes:
+        for nid, paths in sorted(dupes.items()):
+            names = ", ".join(p.name for p in paths)
+            print(f"duplicate id {nid}: {names}", file=sys.stderr)
+        print(f"\n{len(dupes)} duplicate id(s). Links to them are ambiguous. "
+              f"Rename the newer file and its `id:` field, then fix inbound "
+              f"[[links]].", file=sys.stderr)
+        return 1
     return 0
 
 

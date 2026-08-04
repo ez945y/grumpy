@@ -9,6 +9,7 @@ way a caller does.
 
 from __future__ import annotations
 
+import datetime as _dt
 import importlib
 import os
 import re
@@ -226,6 +227,78 @@ class TestLinkGraph(TempWorkspace):
 
 
 # ---------------------------------------------------------------------------
+# Unit - id minting
+#
+# The property under test is that two clones which cannot see each other still
+# cannot mint the same id. The counter this replaced derived the next id from
+# the local working tree, so two people at the same maximum both picked it,
+# their filenames differed by slug, and git merged both without a conflict.
+# ---------------------------------------------------------------------------
+
+class TestMintId(TempWorkspace):
+
+    def test_minting_never_reads_the_notes_directory(self):
+        """The whole point: an id must not be a function of local state.
+
+        Deleting notes/ entirely must not change minting, because that is what
+        guarantees two offline clones cannot agree on the same wrong answer.
+        """
+        before = kb.mint_id("tn")
+        shutil.rmtree(self.notes)
+        after = kb.mint_id("tn")
+        self.assertNotEqual(before, after)
+        self.assertTrue(after.startswith("tn-"))
+
+    def test_same_day_mints_do_not_collide_in_bulk(self):
+        day = _dt.date(2026, 8, 4)
+        ids = {kb.mint_id("tn", day) for _ in range(20000)}
+        # 32**5 possibilities; the birthday bound puts expected collisions at
+        # ~6 for 20k draws. Anything near 20000 means the random part shrank.
+        self.assertGreater(len(ids), 19950)
+
+    def test_ids_sort_by_day_minted(self):
+        early = kb.mint_id("tn", _dt.date(2026, 1, 1))
+        mid = kb.mint_id("tn", _dt.date(2026, 8, 4))
+        late = kb.mint_id("tn", _dt.date(2030, 1, 1))
+        self.assertEqual(sorted([late, early, mid]), [early, mid, late])
+
+    def test_alphabet_excludes_the_confusable_letters(self):
+        for ch in "ilou":
+            self.assertNotIn(ch, kb.ID_ALPHABET)
+
+    def test_wikilinks_resolve_for_both_id_generations(self):
+        """Old counter ids and new token ids must both keep working forever."""
+        pat = kb.wikilink_re()
+        self.assertEqual(pat.findall("see [[tn-0003]]"), ["tn-0003"])
+        self.assertEqual(pat.findall("see [[tn-06qk5366]]"), ["tn-06qk5366"])
+
+
+class TestDuplicateIds(TempWorkspace):
+
+    def test_no_duplicates_in_a_clean_tree(self):
+        write_note(self.notes, "tn-0001-a.md", "id: tn-0001\ntitle: A", "body")
+        write_note(self.notes, "tn-0002-b.md", "id: tn-0002\ntitle: B", "body")
+        self.assertEqual(kb.duplicate_ids(), {})
+
+    def test_two_files_sharing_an_id_are_reported(self):
+        """The merge case: same id, different slug, so git never conflicted."""
+        write_note(self.notes, "tn-0039-alice-note.md",
+                   "id: tn-0039\ntitle: Alice", "body")
+        write_note(self.notes, "tn-0039-bob-note.md",
+                   "id: tn-0039\ntitle: Bob", "body")
+        dupes = kb.duplicate_ids()
+        self.assertIn("tn-0039", dupes)
+        self.assertEqual(len(dupes["tn-0039"]), 2)
+
+    def test_reindex_exits_nonzero_on_a_duplicate(self):
+        write_note(self.notes, "tn-0039-alice-note.md",
+                   "id: tn-0039\ntitle: Alice", "body")
+        write_note(self.notes, "tn-0039-bob-note.md",
+                   "id: tn-0039\ntitle: Bob", "body")
+        self.assertEqual(kb.cmd_reindex(None), 1)
+
+
+# ---------------------------------------------------------------------------
 # Unit - near-duplicate detection
 # ---------------------------------------------------------------------------
 
@@ -299,12 +372,15 @@ class TestCLI(unittest.TestCase):
         (self.tmp / "grumpy.conf").write_text("prefix = tn\n", encoding="utf-8")
         (self.tmp / "notes").mkdir()
         (self.tmp / "tags.md").write_text(TAGS_FIXTURE, encoding="utf-8")
+        self.ids: list[str] = []
 
     def kb(self, *args: str, expect: int = 0, stdin: str = "") -> str:
         r = subprocess.run([sys.executable, "grumpy.py", *args], cwd=self.tmp,
                            capture_output=True, text=True, input=stdin)
         self.assertEqual(r.returncode, expect,
                          f"args={args}\nstdout={r.stdout}\nstderr={r.stderr}")
+        self.ids += (re.findall(r"\(id (tn-[0-9a-z]+)", r.stdout)
+                     or re.findall(r'"id": "(tn-[0-9a-z]+)"', r.stdout))
         return r.stdout + r.stderr
 
     # -- add ---------------------------------------------------------------
@@ -316,24 +392,27 @@ class TestCLI(unittest.TestCase):
         files = list((self.tmp / "notes").glob("*.md"))
         self.assertEqual(len(files), 1)
         text = files[0].read_text(encoding="utf-8")
-        self.assertIn("id: tn-0001", text)
+        self.assertIn(f"id: {self.ids[0]}", text)
         self.assertIn("title: Gateway exits 1", text)
         self.assertIn("repos: [gateway, scheduler]", text)
         self.assertIn("the manifest file is missing", text)
         self.assertIn("## Discussion", text)
-        self.assertTrue(files[0].name.startswith("tn-0001-gateway-exits-1"))
+        self.assertTrue(files[0].name.startswith(f"{self.ids[0]}-gateway-exits-1"))
 
     def test_add_mirrors_kind_into_tags(self):
         self.kb("add", "--title", "T", "--kind", "architecture")
         text = next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8")
         self.assertIn("tags: [architecture]", text)
 
-    def test_add_increments_the_id(self):
+    def test_add_mints_a_distinct_id_per_note(self):
+        """Ids no longer count upwards - see kb.mint_id - so the property is
+        distinctness and filename agreement, not adjacency."""
         self.kb("add", "--title", "One", "--kind", "known-issue", "--tags", "blocker")
         self.kb("add", "--title", "Two", "--kind", "known-issue", "--tags", "blocker")
-        names = sorted(p.name for p in (self.tmp / "notes").glob("*.md"))
-        self.assertTrue(names[0].startswith("tn-0001"))
-        self.assertTrue(names[1].startswith("tn-0002"))
+        self.assertEqual(len(set(self.ids)), 2)
+        names = {p.name for p in (self.tmp / "notes").glob("*.md")}
+        for nid in self.ids:
+            self.assertTrue(any(n.startswith(nid) for n in names), nid)
 
     def test_add_rejects_a_tag_not_in_the_tree(self):
         out = self.kb("add", "--title", "T", "--kind", "known-issue",
@@ -388,9 +467,9 @@ class TestCLI(unittest.TestCase):
         self.kb("add", "--title", "First", "--kind", "architecture",
                 "--body", "the anchor")
         self.kb("add", "--title", "Second", "--kind", "architecture",
-                "--links", "tn-0001", "--body", "points back")
-        text = next((self.tmp / "notes").glob("tn-0002*")).read_text(encoding="utf-8")
-        self.assertIn("links: [tn-0001]", text)
+                "--links", f"{self.ids[0]}", "--body", "points back")
+        text = next((self.tmp / "notes").glob(f"{self.ids[1]}*")).read_text(encoding="utf-8")
+        self.assertIn(f"links: [{self.ids[0]}]", text)
 
     def test_add_links_rejects_a_missing_target(self):
         out = self.kb("add", "--title", "Orphan", "--kind", "architecture",
@@ -409,23 +488,23 @@ class TestCLI(unittest.TestCase):
         import json as _json
         self.kb("add", "--title", "Anchor", "--kind", "architecture", "--body", "a")
         out = self.kb("add", "--title", "Linker", "--kind", "architecture",
-                      "--links", "tn-0001", "--json", "--body", "b")
+                      "--links", f"{self.ids[0]}", "--json", "--body", "b")
         doc = _json.loads(out)
-        self.assertEqual(doc["id"], "tn-0002")
-        self.assertEqual(doc["links"], ["tn-0001"])
+        self.assertEqual(doc["id"], f"{self.ids[1]}")
+        self.assertEqual(doc["links"], [f"{self.ids[0]}"])
 
     def test_search_json_is_a_parseable_array(self):
         self._seed()
         import json as _json
         doc = _json.loads(self.kb("search", "manifest", "--json"))
-        self.assertEqual(doc[0]["id"], "tn-0001")
+        self.assertEqual(doc[0]["id"], f"{self.ids[0]}")
         self.assertEqual(doc[0]["kind"], "known-issue")
 
     def test_read_json_carries_the_body_and_links(self):
         import json as _json
         self.kb("add", "--title", "Anchor", "--kind", "architecture", "--body", "anchor body")
-        doc = _json.loads(self.kb("read", "tn-0001", "--json"))
-        self.assertEqual(doc["id"], "tn-0001")
+        doc = _json.loads(self.kb("read", f"{self.ids[0]}", "--json"))
+        self.assertEqual(doc["id"], f"{self.ids[0]}")
         self.assertIn("anchor body", doc["body"])
 
     # -- search ------------------------------------------------------------
@@ -438,62 +517,62 @@ class TestCLI(unittest.TestCase):
 
     def test_search_matches_the_body(self):
         self._seed()
-        self.assertIn("tn-0001", self.kb("search", "manifest"))
+        self.assertIn(f"{self.ids[0]}", self.kb("search", "manifest"))
 
     def test_search_with_no_query_lists_everything(self):
         self._seed()
         out = self.kb("search")
-        self.assertIn("tn-0001", out)
-        self.assertIn("tn-0002", out)
+        self.assertIn(f"{self.ids[0]}", out)
+        self.assertIn(f"{self.ids[1]}", out)
 
     def test_search_multi_word_query_is_or_not_and(self):
         self._seed()
         out = self.kb("search", "manifest boundary")
-        self.assertIn("tn-0001", out)
-        self.assertIn("tn-0002", out)
+        self.assertIn(f"{self.ids[0]}", out)
+        self.assertIn(f"{self.ids[1]}", out)
 
     def test_search_by_parent_tag_matches_children(self):
         self._seed()
         out = self.kb("search", "--tag", "kind")
-        self.assertIn("tn-0001", out)
-        self.assertIn("tn-0002", out)
+        self.assertIn(f"{self.ids[0]}", out)
+        self.assertIn(f"{self.ids[1]}", out)
 
     def test_search_by_leaf_tag_narrows(self):
         self._seed()
         out = self.kb("search", "--tag", "blocker")
-        self.assertIn("tn-0001", out)
-        self.assertNotIn("tn-0002", out)
+        self.assertIn(f"{self.ids[0]}", out)
+        self.assertNotIn(f"{self.ids[1]}", out)
 
     def test_search_by_repo(self):
         self._seed()
         out = self.kb("search", "--repo", "gateway")
-        self.assertIn("tn-0001", out)
-        self.assertNotIn("tn-0002", out)
+        self.assertIn(f"{self.ids[0]}", out)
+        self.assertNotIn(f"{self.ids[1]}", out)
 
     def test_search_by_kind(self):
         self._seed()
         out = self.kb("search", "--kind", "architecture")
-        self.assertIn("tn-0002", out)
-        self.assertNotIn("tn-0001", out)
+        self.assertIn(f"{self.ids[1]}", out)
+        self.assertNotIn(f"{self.ids[0]}", out)
 
     def test_search_finds_a_cjk_substring(self):
         """unicode61 tokenises an unbroken CJK run as one token, so FTS alone
         cannot match a substring of a Chinese sentence. The fallback must."""
         self.kb("add", "--title", "Expiry", "--kind", "known-issue", "--tags", "blocker",
                 "--body", "優先處理，今天就去要一把新的簽章金鑰")
-        self.assertIn("tn-0001", self.kb("search", "簽章金鑰"))
+        self.assertIn(f"{self.ids[0]}", self.kb("search", "簽章金鑰"))
 
     def test_search_finds_a_partial_english_word(self):
         self._seed()
-        self.assertIn("tn-0001", self.kb("search", "anifes"))
+        self.assertIn(f"{self.ids[0]}", self.kb("search", "anifes"))
 
     def test_fts_still_wins_when_it_matches(self):
         """The fallback must not fire when FTS already answered - otherwise
         stemming and ranking are lost."""
         self._seed()
         out = self.kb("search", "manifest")
-        self.assertIn("tn-0001", out)
-        self.assertNotIn("tn-0002", out)
+        self.assertIn(f"{self.ids[0]}", out)
+        self.assertNotIn(f"{self.ids[1]}", out)
 
     # -- graph traversal from search ---------------------------------------
 
@@ -504,7 +583,7 @@ class TestCLI(unittest.TestCase):
         ids that were not themselves returned."""
         found = []
         for line in out.splitlines():
-            m = re.match(r"^(\s*)([a-z]+-\d+)  \S", line)
+            m = re.match(r"^(\s*)([a-z]+-[0-9a-z]+)  \S", line)
             if m:
                 found.append((m.group(2), bool(m.group(1))))
         return found
@@ -513,62 +592,76 @@ class TestCLI(unittest.TestCase):
         self.kb("add", "--title", "Build pipeline", "--kind", "architecture",
                 "--body", "the builder writes output files")
         self.kb("add", "--title", "Local toolchain", "--kind", "decision",
-                "--body", "pinned compiler and runtime, see [[tn-0001]] for why")
+                "--body", f"pinned compiler and runtime, see [[{self.ids[0]}]] for why")
 
     def test_search_lists_a_hit_s_neighbours(self):
         self._linked_pair()
-        self.assertIn("-> tn-0002", self.kb("search", "builder"))
+        self.assertIn(f"-> {self.ids[1]}", self.kb("search", "builder"))
 
     def test_neighbours_are_visible_from_either_end(self):
         self._linked_pair()
-        self.assertIn("-> tn-0001", self.kb("search", "toolchain"))
+        self.assertIn(f"-> {self.ids[0]}", self.kb("search", "toolchain"))
 
     def test_expand_pulls_in_linked_notes_with_attribution(self):
         self._linked_pair()
         out = self.kb("search", "builder", "--expand")
-        self.assertEqual(self.rows(out), [("tn-0001", False), ("tn-0002", True)])
-        self.assertIn("via tn-0001", out)
+        # Set comparison: token ids do not sort into creation order,
+        # and `id` is only the tiebreaker that makes output deterministic.
+        self.assertEqual(set(self.rows(out)),
+                         {(self.ids[0], False), (self.ids[1], True)})
+        self.assertIn(f"via {self.ids[0]}", out)
         self.assertIn("+1 linked", out)
 
     def test_expand_does_not_repeat_a_direct_hit(self):
         self._linked_pair()
         out = self.kb("search", "--expand")          # both notes are direct hits
-        self.assertEqual(self.rows(out), [("tn-0001", False), ("tn-0002", False)])
+        # Compared as a set: `id` is only the tiebreaker that makes output
+        # deterministic, and token ids no longer sort into creation order.
+        # What this test is about is the False flags - neither row is an
+        # expansion - not which of the two prints first.
+        self.assertEqual(set(self.rows(out)),
+                         {(self.ids[0], False), (self.ids[1], False)})
         self.assertNotIn("via", out)
 
     def test_expand_accepts_a_hop_count(self):
         self.kb("add", "--title", "One", "--kind", "architecture",
                 "--body", "first note mentioning aardvark")
         self.kb("add", "--title", "Two", "--kind", "architecture",
-                "--body", "second note pointing at [[tn-0001]]")
+                "--body", f"second note pointing at [[{self.ids[0]}]]")
         self.kb("add", "--title", "Three", "--kind", "architecture",
-                "--body", "third note pointing at [[tn-0002]]")
+                "--body", f"third note pointing at [[{self.ids[1]}]]")
         one = [nid for nid, _ in self.rows(self.kb("search", "aardvark", "--expand", "1"))]
         two = [nid for nid, _ in self.rows(self.kb("search", "aardvark", "--expand", "2"))]
-        self.assertEqual(one, ["tn-0001", "tn-0002"])
-        self.assertEqual(two, ["tn-0001", "tn-0002", "tn-0003"])
+        # Set comparison: token ids do not sort into creation order,
+        # and `id` is only the tiebreaker that makes output deterministic.
+        self.assertEqual(set(one), {self.ids[0], self.ids[1]})
+        self.assertEqual(set(two), set(self.ids[:3]))
+        self.assertLess(set(one), set(two))
 
     def test_task_search_expands_its_context_by_default(self):
         """A task read without the findings behind it is just a sentence."""
         self.kb("add", "--title", "Background", "--kind", "known-issue", "--tags", "blocker",
                 "--body", "the aardvark subsystem drops frames on reboot")
         self.kb("add", "--title", "Fix the aardvark", "--kind", "task", "--force",
-                "--body", "see [[tn-0001]] for what is actually broken")
+                "--body", f"see [[{self.ids[0]}]] for what is actually broken")
         rows = self.rows(self.kb("search", "--kind", "task"))
-        self.assertEqual(rows, [("tn-0002", False), ("tn-0001", True)])
+        # Set comparison: token ids do not sort into creation order,
+        # and `id` is only the tiebreaker that makes output deterministic.
+        self.assertEqual(set(rows),
+                         {(self.ids[1], False), (self.ids[0], True)})
 
     def test_expand_zero_suppresses_the_task_default(self):
         self.kb("add", "--title", "Background", "--kind", "known-issue", "--tags", "blocker",
                 "--body", "the aardvark subsystem drops frames on reboot")
         self.kb("add", "--title", "Fix the aardvark", "--kind", "task", "--force",
-                "--body", "see [[tn-0001]] for what is actually broken")
+                "--body", f"see [[{self.ids[0]}]] for what is actually broken")
         rows = self.rows(self.kb("search", "--kind", "task", "--expand", "0"))
-        self.assertEqual(rows, [("tn-0002", False)])
+        self.assertEqual(rows, [(f"{self.ids[1]}", False)])
 
     def test_non_task_searches_do_not_expand_on_their_own(self):
         self._linked_pair()
         self.assertEqual(self.rows(self.kb("search", "builder")),
-                         [("tn-0001", False)])
+                         [(f"{self.ids[0]}", False)])
 
     def test_search_hints_at_expand_when_links_exist(self):
         self._linked_pair()
@@ -585,7 +678,7 @@ class TestCLI(unittest.TestCase):
         out = self.kb("add", "--title", "The build pipeline again",
                       "--kind", "architecture", "--body", self.DUP_BODY, expect=2)
         self.assertIn("overlap with existing notes", out)
-        self.assertIn("tn-0001", out)
+        self.assertIn(f"{self.ids[0]}", out)
         self.assertEqual(len(list((self.tmp / "notes").glob("*.md"))), 1)
 
     def test_refusal_states_both_the_score_and_the_limit(self):
@@ -597,7 +690,7 @@ class TestCLI(unittest.TestCase):
                       "--kind", "architecture", "--body", self.DUP_BODY, expect=2)
         self.assertRegex(out, r"overlap with existing notes is \d+%")
         self.assertIn("the limit is 60%", out)
-        self.assertRegex(out, r"\d+%\s+tn-0001")
+        self.assertRegex(out, fr"\d+%\s+{self.ids[0]}")
 
     def test_short_f_is_accepted(self):
         self.kb("add", "--title", "Build pipeline", "--kind", "architecture",
@@ -660,7 +753,7 @@ class TestCLI(unittest.TestCase):
         self._with_status("Still broken", "open")
         self._with_status("Since fixed", "resolved")
         rows = [nid for nid, _ in self.rows(self.kb("search", "zebra"))]
-        self.assertEqual(rows, ["tn-0001"])
+        self.assertEqual(rows, [f"{self.ids[0]}"])
 
     def test_the_count_says_how_many_were_hidden(self):
         self._with_status("Still broken", "open")
@@ -671,18 +764,20 @@ class TestCLI(unittest.TestCase):
         self._with_status("Still broken", "open")
         self._with_status("Since fixed", "resolved")
         rows = [nid for nid, _ in self.rows(self.kb("search", "zebra", "--all"))]
-        self.assertEqual(rows, ["tn-0001", "tn-0002"])
+        # Set comparison: the claim is that --all returns the settled one too,
+        # not that ids happen to sort into the order they were written.
+        self.assertEqual(set(rows), set(self.ids))
 
     def test_naming_a_settled_status_finds_it_without_all(self):
         self._with_status("Since fixed", "resolved")
-        self.assertIn("tn-0001", self.kb("search", "--status", "resolved"))
+        self.assertIn(f"{self.ids[0]}", self.kb("search", "--status", "resolved"))
 
     def test_a_worked_around_defect_stays_visible(self):
         """The defect is still there and the workaround still needs explaining,
         so this status must not behave like a closed one."""
         self._with_status("Papered over", "workaround-applied")
         out = self.kb("search", "zebra")
-        self.assertIn("tn-0001", out)
+        self.assertIn(f"{self.ids[0]}", out)
         self.assertIn("[workaround-applied]", out)
 
     def test_search_warns_on_an_unknown_tag(self):
@@ -698,7 +793,7 @@ class TestCLI(unittest.TestCase):
         self.kb("search", "manifest")                      # builds the index
         self.kb("add", "--title", "Third", "--kind", "decision",
                 "--body", "unmistakable-token")
-        self.assertIn("tn-0003", self.kb("search", "unmistakable-token"))
+        self.assertIn(f"{self.ids[2]}", self.kb("search", "unmistakable-token"))
 
     # -- tags --------------------------------------------------------------
 
@@ -728,7 +823,7 @@ class TestCLI(unittest.TestCase):
         after = {p.name: p.read_bytes() for p in (self.tmp / "notes").glob("*.md")}
         self.assertEqual(before, after)
         # and the note is still reachable through the tag's new parent
-        self.assertIn("tn-0001", self.kb("search", "--tag", "kind"))
+        self.assertIn(f"{self.ids[0]}", self.kb("search", "--tag", "kind"))
 
     def test_move_refuses_to_create_a_cycle(self):
         self.assertIn("descendant",
@@ -742,24 +837,24 @@ class TestCLI(unittest.TestCase):
 
     def test_discuss_appends_under_the_discussion_heading(self):
         self._seed()
-        self.kb("discuss", "tn-0001", "-m", "we should report this", "--who", "sam")
-        text = next((self.tmp / "notes").glob("tn-0001*.md")).read_text(encoding="utf-8")
+        self.kb("discuss", f"{self.ids[0]}", "-m", "we should report this", "--who", "sam")
+        text = next((self.tmp / "notes").glob(f"{self.ids[0]}*.md")).read_text(encoding="utf-8")
         self.assertIn("**sam**", text)
         self.assertIn("we should report this", text)
         self.assertLess(text.index("## Discussion"), text.index("we should report this"))
 
     def test_discuss_keeps_earlier_entries(self):
         self._seed()
-        self.kb("discuss", "tn-0001", "-m", "first", "--who", "a")
-        self.kb("discuss", "tn-0001", "-m", "second", "--who", "b")
-        text = next((self.tmp / "notes").glob("tn-0001*.md")).read_text(encoding="utf-8")
+        self.kb("discuss", f"{self.ids[0]}", "-m", "first", "--who", "a")
+        self.kb("discuss", f"{self.ids[0]}", "-m", "second", "--who", "b")
+        text = next((self.tmp / "notes").glob(f"{self.ids[0]}*.md")).read_text(encoding="utf-8")
         self.assertIn("first", text)
         self.assertLess(text.index("first"), text.index("second"))
 
     def test_discuss_content_is_searchable(self):
         self._seed()
-        self.kb("discuss", "tn-0001", "-m", "peculiarphrase", "--who", "a")
-        self.assertIn("tn-0001", self.kb("search", "peculiarphrase"))
+        self.kb("discuss", f"{self.ids[0]}", "-m", "peculiarphrase", "--who", "a")
+        self.assertIn(f"{self.ids[0]}", self.kb("search", "peculiarphrase"))
 
     def test_discuss_on_a_missing_note_fails(self):
         self.assertIn("no note matching",
@@ -888,7 +983,13 @@ class TestRealContent(unittest.TestCase):
             if not path.exists():
                 continue
             text = path.read_text(encoding="utf-8")
-            cited = set(_re.findall(rf"\b{kb.prefix()}-\d{{4}}\b", text))
+            # Match only the two shapes an id can actually have - a legacy
+            # 4-digit counter or an 8-char token - and reject a match that
+            # runs on into another hyphen. Without both guards the prefix
+            # swallows repo names: `dn-sdk` is too short to be an id, and
+            # `dn-robotops-console` only looks like one until the `-console`.
+            cited = set(_re.findall(
+                rf"\b{kb.prefix()}-(?:\d{{4}}|[0-9a-z]{{8}})\b(?!-)", text))
             missing = cited - ids
             self.assertFalse(missing, f"{name} cites missing note(s): {sorted(missing)}")
 
@@ -905,11 +1006,14 @@ class TestIssuesAndContext(unittest.TestCase):
         (self.tmp / "tags.md").write_text(
             "- kind\n  - known-issue\n  - decision\n  - task\n"
             "- severity\n  - blocker\n  - major\n  - minor\n", encoding="utf-8")
+        self.ids: list[str] = []
 
     def kb(self, *args, expect=0):
         r = subprocess.run([sys.executable, "grumpy.py", *args], cwd=self.tmp,
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, expect, r.stdout + r.stderr)
+        self.ids += (re.findall(r"\(id (tn-[0-9a-z]+)", r.stdout)
+                     or re.findall(r'"id": "(tn-[0-9a-z]+)"', r.stdout))
         return r.stdout + r.stderr
 
     def _seed(self):
@@ -927,46 +1031,46 @@ class TestIssuesAndContext(unittest.TestCase):
         out = self.kb("issues")
         self.assertLess(out.index("BLOCKER"), out.index("MAJOR"))
         self.assertLess(out.index("MAJOR"), out.index("MINOR"))
-        self.assertLess(out.index("tn-0002"), out.index("tn-0003"))
+        self.assertLess(out.index(f"{self.ids[1]}"), out.index(f"{self.ids[2]}"))
 
     def test_issues_can_be_narrowed_to_one_severity(self):
         self._seed()
         out = self.kb("issues", "--severity", "blocker")
-        self.assertIn("tn-0002", out)
-        self.assertNotIn("tn-0001", out)
+        self.assertIn(f"{self.ids[1]}", out)
+        self.assertNotIn(f"{self.ids[0]}", out)
 
     def test_issues_hides_settled_ones_unless_asked(self):
         self.kb("add", "--title", "Was broken", "--kind", "known-issue",
                 "--tags", "major", "--status", "fixed", "--body", "not any more")
         self.assertIn("no open issues", self.kb("issues", expect=1))
-        self.assertIn("tn-0001", self.kb("issues", "--all"))
+        self.assertIn(f"{self.ids[0]}", self.kb("issues", "--all"))
 
     def test_issues_ignores_other_kinds(self):
         self._seed()
         self.kb("add", "--title", "A choice", "--kind", "decision",
                 "--body", "we went with the second option for these reasons")
-        self.assertNotIn("tn-0004", self.kb("issues"))
+        self.assertNotIn(f"{self.ids[3]}", self.kb("issues"))
 
     def test_context_lists_neighbours_by_kind(self):
         self.kb("add", "--title", "The defect", "--kind", "known-issue",
                 "--tags", "major", "--body", "something is wrong in the widget")
         self.kb("add", "--title", "What we did about it", "--kind", "decision",
-                "--body", "we chose to work around it, see [[tn-0001]]")
-        out = self.kb("read", "tn-0001", "--context")
+                "--body", f"we chose to work around it, see [[{self.ids[0]}]]")
+        out = self.kb("read", f"{self.ids[0]}", "--context")
         self.assertIn("## Context", out)
         self.assertIn("decision", out)
-        self.assertIn("tn-0002", out)
+        self.assertIn(f"{self.ids[1]}", out)
 
     def test_context_is_honest_when_there_is_none(self):
         self.kb("add", "--title", "Lonely", "--kind", "known-issue",
                 "--tags", "minor", "--body", "nothing links here at all yet")
         self.assertIn("nothing links to this yet",
-                      self.kb("read", "tn-0001", "--context"))
+                      self.kb("read", f"{self.ids[0]}", "--context"))
 
     def test_read_without_context_stays_quiet(self):
         self.kb("add", "--title", "The defect", "--kind", "known-issue",
                 "--tags", "major", "--body", "something is wrong in the widget")
-        self.assertNotIn("## Context", self.kb("read", "tn-0001"))
+        self.assertNotIn("## Context", self.kb("read", f"{self.ids[0]}"))
 
 
 class TestInstall(unittest.TestCase):

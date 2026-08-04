@@ -117,3 +117,7 @@ The problem is never too few notes. It is notes nobody trusts.
 Write down what you actually checked, and say whether you read it or ran it.
 Those are different levels of confidence. Skip anything the version history
 would have told you anyway.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
