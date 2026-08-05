@@ -865,6 +865,82 @@ class TestCLI(unittest.TestCase):
 # End-to-end - the real knowledge base in this repo
 # ---------------------------------------------------------------------------
 
+class TestStatusAndDiscussStdin(unittest.TestCase):
+    """The two frictions that cost real work: hand-edited frontmatter, and a
+    -m message the shell rewrote before grumpy ever saw it.
+
+    Its own harness rather than a TestCLI subclass, which would re-run every
+    TestCLI case under a second name for no extra coverage.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        shutil.copy(HERE / "grumpy.py", self.tmp / "grumpy.py")
+        (self.tmp / "grumpy.conf").write_text("prefix = tn\n", encoding="utf-8")
+        (self.tmp / "notes").mkdir()
+        (self.tmp / "tags.md").write_text(TAGS_FIXTURE, encoding="utf-8")
+        self.ids: list[str] = []
+
+    def kb(self, *args: str, expect: int = 0, stdin: str = "") -> str:
+        r = subprocess.run([sys.executable, "grumpy.py", *args], cwd=self.tmp,
+                           capture_output=True, text=True, input=stdin)
+        self.assertEqual(r.returncode, expect,
+                         f"args={args}\nstdout={r.stdout}\nstderr={r.stderr}")
+        self.ids += (re.findall(r"\(id (tn-[0-9a-z]+)", r.stdout)
+                     or re.findall(r'"id": "(tn-[0-9a-z]+)"', r.stdout))
+        return r.stdout + r.stderr
+
+    def _one_note(self) -> str:
+        self.kb("add", "--title", "Gateway exits 1", "--kind", "known-issue",
+                "--tags", "blocker", "--body", "it does")
+        return self.ids[0]
+
+    def test_status_sets_the_frontmatter(self):
+        nid = self._one_note()
+        self.kb("status", nid, "resolved")
+        text = next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("status: resolved", text)
+        self.assertNotIn("status: open", text)
+
+    def test_status_rejects_an_unknown_value(self):
+        nid = self._one_note()
+        out = self.kb("status", nid, "nearly-done", expect=2)
+        self.assertIn("unknown status", out)
+        text = next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("status: open", text, "a rejected value must not be written")
+
+    def test_status_reindexes_so_search_agrees(self):
+        nid = self._one_note()
+        self.kb("status", nid, "resolved")
+        # Settled notes drop out of the default search, and search exits 1 when
+        # nothing is left. A stale index would still list the note and exit 0.
+        self.assertIn("no matches", self.kb("search", "gateway", expect=1))
+        self.assertIn(nid, self.kb("search", "gateway", "--all"))
+
+    def test_discuss_reads_a_heredoc_body(self):
+        nid = self._one_note()
+        self.kb("discuss", nid, stdin="a piped follow-up\n")
+        text = next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("a piped follow-up", text)
+
+    def test_discuss_keeps_backticks_intact(self):
+        # The regression this exists for: passed through -m in a shell, the
+        # backticks below become command substitution and the text arrives
+        # gutted. Via stdin they must survive verbatim.
+        nid = self._one_note()
+        body = "see `internal/compat/machines.go:42` and `DefaultMatrix()`"
+        self.kb("discuss", nid, stdin=body)
+        text = next((self.tmp / "notes").glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("`internal/compat/machines.go:42`", text)
+        self.assertIn("`DefaultMatrix()`", text)
+
+    def test_discuss_refuses_an_empty_message(self):
+        nid = self._one_note()
+        out = self.kb("discuss", nid, stdin="   \n", expect=2)
+        self.assertIn("no message", out)
+
+
 class TestRealContent(unittest.TestCase):
     """Guards against a note or tag edit that breaks the invariants."""
 

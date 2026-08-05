@@ -1112,19 +1112,66 @@ def _print_context(e: dict) -> None:
     print(f"\n  ./grumpy.py read <id>   |   ./grumpy.py search --expand for the full sweep")
 
 
+def _reindex_quiet() -> None:
+    """Refresh the index after a write, without the reindex banner.
+
+    Every command that edits a note calls this. Leaving it to the caller is how
+    a note ends up saying one thing and search another, and the gap is silent.
+    """
+    try:
+        build_index(force=True)
+    except Exception:  # noqa: BLE001 — a stale index must never fail the write
+        pass
+
+
+def cmd_status(args) -> int:
+    """Set a note's lifecycle status, and reindex so search agrees.
+
+    Editing the frontmatter by hand is what this replaces: a sed over `status:`
+    leaves the index describing the old state until someone remembers to
+    reindex, and search is the whole point of the file.
+    """
+    matches = list(NOTES.glob(f"{args.id}*.md"))
+    if not matches:
+        return _die(f"no note matching {args.id!r}")
+    valid = OPEN_STATUS + CLOSED_STATUS
+    if args.value not in valid:
+        return _die(f"unknown status {args.value!r}. One of: {', '.join(valid)}")
+    path = matches[0]
+    text = path.read_text(encoding="utf-8")
+    new, n = re.subn(r"(?m)^status: .*$", f"status: {args.value}", text, count=1)
+    if not n:
+        return _die(f"{path.name} has no status: line to set")
+    path.write_text(new, encoding="utf-8")
+    print(f"{path.stem.split('-')[0]}-{path.stem.split('-')[1]} -> {args.value}")
+    _reindex_quiet()
+    return 0
+
+
 def cmd_discuss(args) -> int:
     matches = list(NOTES.glob(f"{args.id}*.md"))
     if not matches:
         return _die(f"no note matching {args.id!r}")
     path = matches[0]
+
+    # Same contract as `add`: a piped or heredoc body wins, -m is the shortcut
+    # for one line. -m goes through the shell, so backticks in it become
+    # command substitution and the text lands mangled — a heredoc does not.
+    message = args.message
+    if not message and not sys.stdin.isatty():
+        message = sys.stdin.read()
+    if not message or not message.strip():
+        return _die("no message. Pass -m, or pipe one:  grumpy discuss ID <<'EOF' ... EOF")
+
     who = args.who or os.environ.get("USER", "someone")
     stamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     text = path.read_text(encoding="utf-8").rstrip("\n")
     if "## Discussion" not in text:
         text += "\n\n## Discussion"
-    entry = textwrap.indent(args.message.strip(), "  ").lstrip()
+    entry = textwrap.indent(message.strip(), "  ").lstrip()
     path.write_text(f"{text}\n\n**{who}** · {stamp}\n\n{entry}\n", encoding="utf-8")
     print(f"appended to {path.relative_to(ROOT)}")
+    _reindex_quiet()
     return 0
 
 
@@ -1243,9 +1290,17 @@ def main() -> int:
 
     d = sub.add_parser("discuss", help="append a comment to a note")
     d.add_argument("id")
-    d.add_argument("-m", "--message", required=True)
+    # Optional, and a heredoc is the better way to pass one: -m puts the body
+    # through the shell, where backticks become command substitution and the
+    # text arrives mangled. `add` has read stdin for exactly this reason.
+    d.add_argument("-m", "--message")
     d.add_argument("--who")
     d.set_defaults(fn=cmd_discuss)
+
+    st = sub.add_parser("status", help="set a note's lifecycle status")
+    st.add_argument("id")
+    st.add_argument("value", help=f"one of: {', '.join(OPEN_STATUS + CLOSED_STATUS)}")
+    st.set_defaults(fn=cmd_status)
 
     r = sub.add_parser("reindex", help="force a rebuild of the search index")
     r.set_defaults(fn=cmd_reindex)
