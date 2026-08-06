@@ -61,6 +61,40 @@ skill list is read once at startup.
 
 Already have a knowledge base and want to link it? `./grumpy.py install`.
 
+### Where the engine lives
+
+`init` copies the engine into the base it creates, so the base is
+self-contained and a single `git clone` of it works anywhere. That is the
+default and it still is.
+
+The other arrangement is to keep the engine **beside** the bases instead of
+inside each one:
+
+```
+~/work/
+  grumpy/          <- this repo, cloned once
+  team-kb/         <- knowledge only: notes/, docs/, tags.md, grumpy.conf, SKILL.md
+  other-kb/
+```
+
+Worth it when a base is shared with people who should be pulling knowledge, not
+a vendored copy of a tool — one clone of the engine serves every base on the
+box, and the base repo's history stops carrying engine diffs.
+
+The engine finds the base it should operate on, most explicit first:
+
+| | |
+|---|---|
+| `--root PATH` | wins over everything |
+| `$GRUMPY_ROOT` | ambient default |
+| the working directory | when it holds a `grumpy.conf` — so `cd team-kb && ../grumpy/grumpy.py search x` does the obvious thing |
+| the engine's own directory | the self-contained layout `init` produces |
+
+```bash
+cd ~/work/team-kb && ../grumpy/grumpy.py search "the thing"
+~/work/grumpy/grumpy.py --root ~/work/team-kb issues
+```
+
 Two things are worth editing before you start writing: the list of areas in
 `tags.md`, and the description at the top of `SKILL.md`. That description is
 the only thing deciding whether an agent reaches for this, so a vague one means

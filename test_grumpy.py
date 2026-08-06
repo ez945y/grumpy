@@ -1285,5 +1285,80 @@ class TestSkillFile(unittest.TestCase):
             self.assertIn(f"grumpy.py {verb}", self.text, f"{verb} is undocumented")
 
 
+class TestRootResolution(unittest.TestCase):
+    """The engine can live outside the base it operates on.
+
+    That layout is what lets one clone of grumpy serve every base on a box, and
+    lets a base repo hold nothing but knowledge. The self-contained layout that
+    `init` still produces has to keep working alongside it, so all four
+    resolution paths are pinned here rather than just the new ones.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # Engine and base as siblings, and the base has NO copy of the engine.
+        self.engine = self.tmp / "engine"
+        self.engine.mkdir()
+        shutil.copy(HERE / "grumpy.py", self.engine / "grumpy.py")
+        self.base = self.tmp / "base"
+        (self.base / "notes").mkdir(parents=True)
+        (self.base / "docs").mkdir()
+        (self.base / "grumpy.conf").write_text("prefix = tn\nname = base\n", encoding="utf-8")
+        (self.base / "tags.md").write_text(TAGS_FIXTURE, encoding="utf-8")
+        (self.base / "notes" / "tn-0001-a-note.md").write_text(
+            "---\nid: tn-0001\ntitle: A findable note\nkind: architecture\n"
+            "status: open\ntags: [architecture]\nrepos: []\nlinks: []\n"
+            "created: 2026-01-01\n---\n\nBody text.\n", encoding="utf-8")
+
+    def run_engine(self, *args: str, cwd: Path, env_root: str | None = None,
+                   expect: int = 0) -> str:
+        env = dict(os.environ)
+        env.pop("GRUMPY_ROOT", None)
+        if env_root:
+            env["GRUMPY_ROOT"] = env_root
+        r = subprocess.run([sys.executable, str(self.engine / "grumpy.py"), *args],
+                           cwd=cwd, capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, expect, f"args={args}\n{r.stdout}\n{r.stderr}")
+        return r.stdout + r.stderr
+
+    def test_cwd_holding_a_conf_wins(self) -> None:
+        # `cd my-kb && ../grumpy/grumpy.py search x` must do the obvious thing.
+        self.assertIn("findable", self.run_engine("search", "findable", cwd=self.base))
+
+    def test_root_flag_works_from_anywhere(self) -> None:
+        out = self.run_engine("--root", str(self.base), "search", "findable", cwd=self.tmp)
+        self.assertIn("findable", out)
+
+    def test_env_var_works_from_anywhere(self) -> None:
+        out = self.run_engine("search", "findable", cwd=self.tmp, env_root=str(self.base))
+        self.assertIn("findable", out)
+
+    def test_flag_beats_env(self) -> None:
+        # Explicit beats ambient, or a stale exported GRUMPY_ROOT silently wins
+        # over what the caller just typed.
+        empty = self.tmp / "empty"
+        (empty / "notes").mkdir(parents=True)
+        (empty / "grumpy.conf").write_text("prefix = zz\n", encoding="utf-8")
+        (empty / "tags.md").write_text(TAGS_FIXTURE, encoding="utf-8")
+        # Searching the empty base finds nothing, and `search` exits 1 on no
+        # matches — that non-zero IS the assertion here: the flag sent it to the
+        # empty base rather than to the one GRUMPY_ROOT names.
+        out = self.run_engine("--root", str(empty), "search", "findable",
+                              cwd=self.tmp, env_root=str(self.base), expect=1)
+        self.assertNotIn("findable", out)
+
+    def test_self_contained_layout_still_works(self) -> None:
+        # What `init` produces. Engine inside the base, run from elsewhere, no
+        # flag and no env: it must still find its own directory.
+        shutil.copy(HERE / "grumpy.py", self.base / "grumpy.py")
+        env = dict(os.environ)
+        env.pop("GRUMPY_ROOT", None)
+        r = subprocess.run([sys.executable, str(self.base / "grumpy.py"), "search", "findable"],
+                           cwd=self.tmp, capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("findable", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

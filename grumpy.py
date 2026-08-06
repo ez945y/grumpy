@@ -25,7 +25,45 @@ import sys
 import textwrap
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+def _resolve_root() -> Path:
+    """Where the knowledge base lives — which is not necessarily where this file does.
+
+    The engine is project-agnostic, so an instance can keep it as a sibling
+    rather than a copy inside itself. That is the arrangement worth having: one
+    engine, cloned once, serving every base on the box, and a base repo that
+    holds nothing but knowledge. `init` still copies the engine in for anyone
+    who prefers a self-contained base, and that keeps working — hence the last
+    fallback.
+
+    Resolution order, most explicit first:
+
+    1. `--root PATH` on the command line.
+    2. `$GRUMPY_ROOT`.
+    3. The working directory, when it holds a `grumpy.conf`. This is what makes
+       `cd my-kb && ../grumpy/grumpy.py search x` do the obvious thing.
+    4. This file's own directory — the self-contained layout.
+
+    Parsed off `sys.argv` by hand because ROOT is needed at import time, before
+    argparse runs: NOTES, DOCS and the rest are derived from it below. `--root`
+    is also registered on the parser so it documents itself and does not read as
+    an unknown flag.
+    """
+    argv = sys.argv[1:]
+    for i, a in enumerate(argv):
+        if a == "--root" and i + 1 < len(argv):
+            return Path(argv[i + 1]).expanduser().resolve()
+        if a.startswith("--root="):
+            return Path(a.split("=", 1)[1]).expanduser().resolve()
+    env = os.environ.get("GRUMPY_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    cwd = Path.cwd()
+    if (cwd / "grumpy.conf").exists():
+        return cwd
+    return Path(__file__).resolve().parent
+
+
+ROOT = _resolve_root()
 NOTES = ROOT / "notes"
 DOCS = ROOT / "docs"
 TAGS_FILE = ROOT / "tags.md"
@@ -1202,6 +1240,12 @@ def _die(msg: str) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(prog="grumpy", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    # Consumed in _resolve_root() at import time; declared here so --help
+    # documents it and argparse does not reject it as unknown.
+    p.add_argument("--root", metavar="PATH",
+                   help="the knowledge base to operate on (default: $GRUMPY_ROOT, "
+                        "else the working directory if it holds a grumpy.conf, "
+                        "else this script's directory)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("search", help="full-text search, filtered by tag/kind/repo")
