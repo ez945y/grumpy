@@ -873,6 +873,55 @@ the alternatives it rejected. Reproducible by following it: `runbook`.
   - task: open work. `status: open` until done
 """
 
+STARTER_README = """\
+# {name}
+
+Knowledge base. The notes are the point; this file only says how to run them.
+
+**It does not contain the engine.** `grumpy.py` lives beside this directory, so
+a fresh clone of this repo has no runnable tool until that exists next to it.
+
+## First thing, once
+
+```bash
+git clone https://github.com/ez945y/grumpy ../grumpy
+```
+
+Layout, after that:
+
+```
+{name}/     notes, docs, tags.md, grumpy.conf, SKILL.md
+grumpy/     the engine, cloned once, shared by every base on this box
+```
+
+## Running it
+
+Always **from this directory** — the engine resolves the base from the working
+directory when it holds a `grumpy.conf`, which this does.
+
+```bash
+cd {name}
+../grumpy/grumpy.py search <query>
+../grumpy/grumpy.py issues
+../grumpy/grumpy.py read <id>
+```
+
+Stdlib Python only. No dependencies, no server, no build step.
+
+## For an agent
+
+`SKILL.md` is the instruction set — when to search this before reading source,
+what a note must contain, and what the `add` gates refuse. Read that, not this.
+Link it into your agent's skills directory with:
+
+```bash
+../grumpy/grumpy.py install
+```
+
+Restart the agent tool afterwards; skills are read once at startup.
+"""
+
+
 STARTER_SKILL = """\
 ---
 name: {name}
@@ -984,11 +1033,13 @@ def cmd_init(args) -> int:
     pre = args.prefix or "".join(w[0] for w in re.split(r"[^a-z0-9]+", name.lower())
                                  if w)[:3] or "n"
 
-    for f in ("grumpy.py", "test_grumpy.py"):
-        src = ROOT / f
-        if src.exists():
-            shutil.copy(src, dest / f)
-    (dest / "grumpy.py").chmod(0o755)
+    # The engine is NOT copied in. A base holds knowledge; the engine is cloned
+    # once and sits beside it, which is what lets one clone serve every base and
+    # keeps a shared base's history free of engine diffs. ROOT resolution
+    # already supports both layouts, so anyone who wants a self-contained base
+    # can copy grumpy.py in themselves — but the generated README describes the
+    # sibling layout, and a default that contradicted it would be worse than
+    # either choice alone.
 
     (dest / "grumpy.conf").write_text(
         "# Instance configuration. The engine (grumpy.py, test_grumpy.py) is\n"
@@ -996,6 +1047,12 @@ def cmd_init(args) -> int:
         f"prefix = {pre}\nname = {name}\ntitle = {args.title or name}\n",
         encoding="utf-8")
     (dest / "tags.md").write_text(STARTER_TAGS, encoding="utf-8")
+    # README and SKILL are both generated, and they are not the same document.
+    # README is the ninety seconds before anything works — clone the engine next
+    # door, run it from here. SKILL is what an agent loads to decide whether to
+    # search at all. A base with only one of them either strands a human at a
+    # repo with no runnable tool, or an agent with no reason to open it.
+    (dest / "README.md").write_text(STARTER_README.format(name=name), encoding="utf-8")
     (dest / ".gitignore").write_text(".index.db\n__pycache__/\n*.pyc\n",
                                      encoding="utf-8")
     (dest / "SKILL.md").write_text(STARTER_SKILL.format(
