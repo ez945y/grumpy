@@ -58,12 +58,22 @@ git clone <this repo> grumpy
 ./grumpy.py issues                              # 已知問題，最嚴重的在前
 ./grumpy.py read n-0004 --context               # 一則筆記，加上它連到的東西
 ./grumpy.py add --title "..." --kind known-issue --tags major
+./grumpy.py link n-0004 n-0009 n-0011           # 引用在它之後才寫的筆記
+./grumpy.py status n-0004 resolved              # 結案（不要手改檔案）
 ./grumpy.py discuss n-0004 -m "這個應該要好好修一下"
 ./grumpy.py install                             # 讓 agent 工具看得到它
 ```
 
 處理問題時最有用的是 `read --context`。筆記告訴你什麼壞了，而 context 告訴你
 當初對它做了什麼決定、誰在處理、哪一套步驟繞得過去。
+
+要描述的東西有好幾個部分時，用 `link`。先寫總覽、把它有哪幾條列出來，再一條
+一條寫、寫完就接上去。`add --links` 表達不了這個順序 —— id 是建立當下才配發
+的，所以一則筆記只能引用比它早存在的東西 —— 而這個順序正是值得鼓勵的那個，
+因為沒有被命名的那條，就是最後被漏掉的那條。
+
+`status` 的存在是為了不要有人去手改 frontmatter。對 `status:` 跑 `sed` 會讓
+搜尋索引停在舊狀態，直到有人想起來要 reindex，而搜尋正是這些檔案存在的理由。
 
 每則筆記都屬於六個類別之一：`architecture`（東西是怎麼組起來的）、
 `known-issue`（壞掉的東西）、`decision`（一個選擇和它的理由）、`runbook`
@@ -97,6 +107,10 @@ python3 -m unittest test_grumpy -v      # 107 個測試
 
 寫下你實際查證過的東西，並且註明是讀到的還是跑過的，那是不同程度的把握。
 凡是翻一下版本紀錄就會知道的，略過。
+
+## 版本紀錄
+
+[CHANGELOG.md](CHANGELOG.md) —— 改了什麼，以及在那之前是什麼樣子。
 
 ## 授權
 

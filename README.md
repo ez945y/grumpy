@@ -107,6 +107,8 @@ it never gets used.
 ./grumpy.py issues                              # known problems, worst first
 ./grumpy.py read n-0004 --context               # one note, plus what it links to
 ./grumpy.py add --title "..." --kind known-issue --tags major
+./grumpy.py link n-0004 n-0009 n-0011           # cite notes written after it
+./grumpy.py status n-0004 resolved              # close it (never hand-edit)
 ./grumpy.py discuss n-0004 -m "we should fix this properly"
 ./grumpy.py install                             # make it visible to agent tools
 ```
@@ -114,6 +116,17 @@ it never gets used.
 `read --context` is the useful one for a problem. The note tells you what is
 broken; the context tells you what was decided about it, who is on it, and
 which set of steps works around it.
+
+`link` is the one to reach for when the thing you are describing has parts.
+Write the overview first, listing the threads it has, then write each thread
+and link it on. `add --links` cannot express that order — ids are assigned at
+creation, so a note can only cite what preceded it — and the ordering is the
+one worth encouraging, because a thread nobody named is the one that gets left
+behind.
+
+`status` exists so nobody edits the frontmatter by hand. A `sed` over
+`status:` leaves the search index describing the old state until someone
+remembers to reindex, and search is the whole point of the file.
 
 Every note is one of six kinds: `architecture` (how something is built),
 `known-issue` (something broken), `decision` (a choice and why), `runbook`
@@ -136,7 +149,7 @@ so one copy can serve several knowledge bases. Everything project-specific sits
 in `grumpy.conf`, `tags.md`, `notes/` and `docs/` beside them.
 
 ```bash
-python3 -m unittest test_grumpy -v      # 107 tests
+python3 -m unittest test_grumpy -v      # 150 tests
 ```
 
 Unit tests cover parsing, the tag tree, the link graph and the duplicate check.
@@ -151,6 +164,10 @@ The problem is never too few notes. It is notes nobody trusts.
 Write down what you actually checked, and say whether you read it or ran it.
 Those are different levels of confidence. Skip anything the version history
 would have told you anyway.
+
+## Releases
+
+[CHANGELOG.md](CHANGELOG.md) — what changed, and what it was like before.
 
 ## License
 
