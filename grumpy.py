@@ -364,6 +364,16 @@ def write_tags(tags: dict) -> None:
 # a body counts as an edge so prose links are not second-class.
 # ---------------------------------------------------------------------------
 
+def _self() -> str:
+    """How this engine was invoked, for the `next:` hints.
+
+    Hardcoding `./grumpy.py` was right for exactly one layout. `init` now
+    leaves the engine BESIDE the base, so every printed hint told the reader to
+    run a file that is not there. argv[0] is what they actually typed.
+    """
+    return sys.argv[0] if sys.argv and sys.argv[0] else "grumpy.py"
+
+
 def link_graph(notes: list[dict]) -> dict[str, set[str]]:
     ids = {n["id"] for n in notes}
     graph: dict[str, set[str]] = {n["id"]: set() for n in notes}
@@ -575,7 +585,7 @@ def cmd_search(args) -> int:
                 names = [s for s, _ in sections(d["body"])]
                 if names:
                     print(f"{pad}    sections: {' | '.join(names)}")
-                print(f"{pad}    read:  ./grumpy.py read {nid} --section \"<name>\"")
+                print(f"{pad}    read:  {_self()} read {nid} --section \"<name>\"")
         nbrs = sorted(graph.get(nid, ()))
         if nbrs:
             print(f"{pad}    -> {' '.join(nbrs)}")
@@ -717,7 +727,7 @@ def cmd_add(args) -> int:
             return 0
         print(f"wrote {path.relative_to(ROOT)}  (id {nid}, {len(body)} chars, "
               f"{len(sections(body))} sections)")
-        print(f"next: ./grumpy.py read {nid}")
+        print(f"next: {_self()} read {nid}")
         return 0
 
     counted = prose_len(body)
@@ -792,7 +802,7 @@ def cmd_add(args) -> int:
         tail = "  <- link these" if closest["score"] >= DUP_THRESHOLD else ""
         print(f"closest existing note: {closest['score']:.0%}  "
               f"{closest['id']}  {closest['title']}{tail}")
-    print(f"next: ./grumpy.py read {nid} --context")
+    print(f"next: {_self()} read {nid} --context")
     return 0
 
 
@@ -968,15 +978,16 @@ the failure mode this exists to prevent.
 
 ## Commands
 
-Run from `{root}`. Stdlib Python only, nothing to install.
+Run from `{root}`. The engine is the sibling clone, not a file in here — see
+the README. Stdlib Python only, nothing to install.
 
 ```bash
-./grumpy.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]] [--json]
-./grumpy.py issues [--severity S] [--repo R]
-./grumpy.py read <id> [--context] [--section NAME] [--full] [--json]
-./grumpy.py add --title T --kind K [--tags a,b] [--repos x,y] [--links id,id] [--json]
-./grumpy.py tags [--add SLUG --parent P] [--move SLUG --parent P]
-./grumpy.py discuss <id> -m "..."
+../grumpy/grumpy.py search <query> [--tag T] [--kind K] [--repo R] [--all] [--expand [HOPS]] [--json]
+../grumpy/grumpy.py issues [--severity S] [--repo R]
+../grumpy/grumpy.py read <id> [--context] [--section NAME] [--full] [--json]
+../grumpy/grumpy.py add --title T --kind K [--tags a,b] [--repos x,y] [--links id,id] [--json]
+../grumpy/grumpy.py tags [--add SLUG --parent P] [--move SLUG --parent P]
+../grumpy/grumpy.py discuss <id> -m "..."
 ```
 
 `add` reads the body from a pipe (heredoc) automatically, or takes `--body`.
@@ -992,9 +1003,9 @@ parsing prose; `add --json` returns the new id.
 ## Start here
 
 ```bash
-./grumpy.py search --kind architecture
-./grumpy.py issues
-./grumpy.py search --kind task --status open
+../grumpy/grumpy.py search --kind architecture
+../grumpy/grumpy.py issues
+../grumpy/grumpy.py search --kind task --status open
 ```
 
 ## Writing a note
@@ -1111,9 +1122,9 @@ def cmd_init(args) -> int:
     print("\nNext:")
     print("  1. edit tags.md    replace the EDITME area branch")
     print("  2. edit SKILL.md   the description decides whether an agent loads it")
-    print(f"  3. cd {dest} && ./grumpy.py add --title ... --kind architecture")
+    print(f"  3. cd {dest} && ../grumpy/grumpy.py add --title ... --kind architecture")
     if not args.install:
-        print(f"  4. ./grumpy.py install   make it visible to your agent tool")
+        print(f"  4. ../grumpy/grumpy.py install   make it visible to your agent tool")
     return 0
 
 
@@ -1154,7 +1165,7 @@ def cmd_issues(args) -> int:
         nbrs = sorted(graph.get(n["id"], ()))
         if nbrs:
             print(f"           -> {' '.join(nbrs)}")
-    print(f"\n{len(rows)} issue(s).  ./grumpy.py read <id> --context  for one with "
+    print(f"\n{len(rows)} issue(s).  {_self()} read <id> --context  for one with "
           f"its decisions and tasks")
     return 0
 
@@ -1210,7 +1221,7 @@ def cmd_read(args) -> int:
     print(f"\n{len(parts)} section(s):")
     for name, text in parts:
         print(f"  {len(text.splitlines()):4} lines  {name}")
-    print(f"\n./grumpy.py read {e['id']} --section \"<name>\"   |   --full for all of it")
+    print(f"\n{_self()} read {e['id']} --section \"<name>\"   |   --full for all of it")
     if args.context:
         _print_context(e)
     return 0
@@ -1235,7 +1246,7 @@ def _print_context(e: dict) -> None:
         n = by_id[nid]
         flag = "" if n["status"] == "open" else f" [{n['status']}]"
         print(f"  {n['kind']:<12} {nid}  {n['title']}{flag}")
-    print(f"\n  ./grumpy.py read <id>   |   ./grumpy.py search --expand for the full sweep")
+    print(f"\n  {_self()} read <id>   |   {_self()} search --expand for the full sweep")
 
 
 def _reindex_quiet() -> None:

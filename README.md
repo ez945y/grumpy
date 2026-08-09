@@ -50,7 +50,7 @@ found. Add `-f` if you meant it.
 ## Quick Start
 
 ```bash
-git clone <this repo> grumpy
+git clone https://github.com/ez945y/grumpy.git
 ./grumpy/grumpy.py init ~/my-notes --name my-notes --install
 ```
 
@@ -63,12 +63,8 @@ Already have a knowledge base and want to link it? `./grumpy.py install`.
 
 ### Where the engine lives
 
-`init` copies the engine into the base it creates, so the base is
-self-contained and a single `git clone` of it works anywhere. That is the
-default and it still is.
-
-The other arrangement is to keep the engine **beside** the bases instead of
-inside each one:
+`init` creates a base holding knowledge only — notes, docs, tags, config — and
+leaves the engine where you cloned it, beside the base rather than inside it:
 
 ```
 ~/work/
@@ -77,9 +73,13 @@ inside each one:
   other-kb/
 ```
 
-Worth it when a base is shared with people who should be pulling knowledge, not
-a vendored copy of a tool — one clone of the engine serves every base on the
-box, and the base repo's history stops carrying engine diffs.
+One clone of the engine serves every base on the box, a base shared with other
+people carries knowledge rather than a vendored copy of a tool, and the base
+repo's history stops filling with engine diffs.
+
+Nothing stops you copying `grumpy.py` into a base to make it self-contained —
+`--root` resolution supports both layouts, and the last entry in the table
+below is that one.
 
 The engine finds the base it should operate on, most explicit first:
 
@@ -88,7 +88,7 @@ The engine finds the base it should operate on, most explicit first:
 | `--root PATH` | wins over everything |
 | `$GRUMPY_ROOT` | ambient default |
 | the working directory | when it holds a `grumpy.conf` — so `cd team-kb && ../grumpy/grumpy.py search x` does the obvious thing |
-| the engine's own directory | the self-contained layout `init` produces |
+| the engine's own directory | a self-contained base, if you copied the engine in |
 
 ```bash
 cd ~/work/team-kb && ../grumpy/grumpy.py search "the thing"

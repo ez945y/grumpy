@@ -44,7 +44,7 @@ grumpy 保持小：
 ## 開始
 
 ```bash
-git clone <this repo> grumpy
+git clone https://github.com/ez945y/grumpy.git
 ./grumpy/grumpy.py init ~/my-notes --name my-notes --title "My notes"
 ```
 
