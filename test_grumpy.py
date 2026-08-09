@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import importlib
+import json
 import os
 import re
 import shutil
@@ -707,7 +708,60 @@ class TestCLI(unittest.TestCase):
                       "--body", "the scheduler retries a job whose worker "
                                 "vanished, duplicating every side effect")
         self.assertIn("closest existing note:", out)
-        self.assertRegex(out, r"\d+/2000 chars")
+        self.assertRegex(out, r"\d+/2000 prose chars")
+
+    # -- link ----------------------------------------------------------------
+
+    def test_link_adds_to_a_note_written_before_its_parts(self):
+        """The map-first workflow: an overview, then the threads under it.
+
+        `add --links` cannot express it, because it validates against notes
+        that exist and the threads do not yet. Without `link` the only way to
+        finish the map was editing the file, which leaves the index behind.
+        """
+        m = self.kb("add", "--title", "The map", "--kind", "architecture",
+                    "--body", "what crosses the cut", "--json")
+        map_id = json.loads(m)["id"]
+        t = self.kb("add", "--title", "Thread one", "--kind", "architecture",
+                    "--body", "the first thing to walk", "--json")
+        thread_id = json.loads(t)["id"]
+
+        out = self.kb("link", map_id, thread_id)
+        self.assertIn(thread_id, out)
+        map_file = next((self.tmp / "notes").glob(f"{map_id}*.md"))
+        self.assertIn(thread_id, map_file.read_text(encoding="utf-8"))
+        # Read both ways: the thread knows who cited it.
+        self.assertIn(map_id, self.kb("read", thread_id, "--context"))
+
+    def test_link_is_idempotent_and_checks_its_targets(self):
+        m = self.kb("add", "--title", "The map", "--kind", "architecture",
+                    "--body", "what crosses the cut", "--json")
+        map_id = json.loads(m)["id"]
+        t = self.kb("add", "--title", "Thread one", "--kind", "architecture",
+                    "--body", "the first thing to walk", "--json")
+        thread_id = json.loads(t)["id"]
+        self.kb("link", map_id, thread_id)
+        self.assertIn("already links", self.kb("link", map_id, thread_id))
+        out = self.kb("link", map_id, "tn-nosuch", expect=2)
+        self.assertIn("matches no existing note", out)
+
+    # -- length --------------------------------------------------------------
+
+    def test_tables_and_code_do_not_count_toward_the_limit(self):
+        """The limit is there to stop two findings sharing a note. A table is
+        the opposite of that, and charging for it made authors cut prose."""
+        table = "\n".join(f"| row {i} | {'x' * 60} |" for i in range(40))
+        body = "one claim, and the evidence under it.\n\n" + table
+        self.assertGreater(len(body), 2000)
+        out = self.kb("add", "--title", "Sized by prose", "--kind", "architecture",
+                      "--body", body)
+        self.assertIn("prose chars", out)
+
+    def test_prose_over_the_limit_is_still_refused(self):
+        body = "x" * 2100
+        out = self.kb("add", "--title", "Essay two", "--kind", "architecture",
+                      "--body", body, expect=2)
+        self.assertIn("characters of prose", out)
 
     # -- length --------------------------------------------------------------
 

@@ -720,9 +720,12 @@ def cmd_add(args) -> int:
         print(f"next: ./grumpy.py read {nid}")
         return 0
 
-    if len(body) > MAX_BODY and not args.force:
+    counted = prose_len(body)
+    if counted > MAX_BODY and not args.force:
+        extra = f" ({len(body)} with tables and code, which do not count)" \
+            if counted != len(body) else ""
         return _die(
-            f"body is {len(body)} characters; the limit is {MAX_BODY}.\n"
+            f"body is {counted} characters of prose{extra}; the limit is {MAX_BODY}.\n"
             f"That is usually two issues in one note, and the second becomes\n"
             f"unfindable. Split it and link the halves, or re-run with -f."
         )
@@ -758,10 +761,16 @@ def cmd_add(args) -> int:
         encoding="utf-8",
     )
 
+    # Reported as advice, and advice that never changes stops being read. An
+    # open `task` is long and shares vocabulary with everything near it, so it
+    # won the closest slot for five notes out of seven in one session while
+    # meaning nothing. Skipped here and here only: the overlap GATE above still
+    # sees tasks, so a genuine duplicate of one is still refused.
     closest = None
-    if scored:
-        s, n = scored[0]
-        closest = {"score": round(s, 4), "id": n["id"], "title": n["title"]}
+    advisory = [(sc, n) for sc, n in scored if n.get("kind") != "task"] or scored
+    if advisory:
+        sc, n = advisory[0]
+        closest = {"score": round(sc, 4), "id": n["id"], "title": n["title"]}
 
     if args.json:
         print(json.dumps({
@@ -772,18 +781,40 @@ def cmd_add(args) -> int:
             "tags": given,
             "repos": [r for r in repos.split(", ") if r],
             "links": link_ids,
-            "chars": len(body),
+            "chars": counted,
+            "chars_total": len(body),
             "closest": closest,
         }, ensure_ascii=False))
         return 0
 
-    print(f"wrote {path.relative_to(ROOT)}  (id {nid}, {len(body)}/{MAX_BODY} chars)")
+    print(f"wrote {path.relative_to(ROOT)}  (id {nid}, {counted}/{MAX_BODY} prose chars)")
     if closest:
         tail = "  <- link these" if closest["score"] >= DUP_THRESHOLD else ""
         print(f"closest existing note: {closest['score']:.0%}  "
               f"{closest['id']}  {closest['title']}{tail}")
     print(f"next: ./grumpy.py read {nid} --context")
     return 0
+
+
+# A note's length is measured over its PROSE.
+#
+# The limit exists to stop two findings sharing one note. A markdown table or a
+# fenced block is the opposite of that: it is the densest, least redundant way
+# to say one thing, and charging it by the character pushed authors to delete
+# load-bearing sentences to fit a table they had already made as small as it
+# goes. Three notes in one session were rejected at 1770-2119 characters, every
+# one of them a single claim with a table under it.
+#
+# Structure is therefore free and prose is not.
+_FENCE_RE = re.compile(r"(?ms)^```.*?^```\s*$")
+_TABLE_ROW_RE = re.compile(r"(?m)^\s*\|.*\|\s*$")
+
+
+def prose_len(body: str) -> int:
+    """Characters that count toward MAX_BODY: everything but tables and code."""
+    stripped = _FENCE_RE.sub("", body)
+    stripped = _TABLE_ROW_RE.sub("", stripped)
+    return len(stripped)
 
 
 def cmd_tags(args) -> int:
@@ -1243,6 +1274,56 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_link(args) -> int:
+    """Add links to an existing note, so a map can be written before its parts.
+
+    `add --links` validates against notes that already exist, which is the
+    right check and the wrong moment for one workflow: writing the overview
+    first and the threads afterwards. That ordering is the one worth
+    encouraging — it is how you find out which threads there are — and without
+    this the only way to finish it was editing the file, which leaves the
+    index describing the old state.
+
+    Links are written one way and read both ways (see link_graph), so this
+    touches only the source note.
+    """
+    matches = list(NOTES.glob(f"{args.id}*.md"))
+    if not matches:
+        return _die(f"no note matching {args.id!r}")
+    path = matches[0]
+    text = path.read_text(encoding="utf-8")
+
+    known = {n["id"] for n in all_notes()}
+    doc_ids = {d["id"] for d in all_docs()}
+    targets: list[str] = []
+    for t in args.targets:
+        t = t.strip()
+        if not t or t == args.id:
+            continue
+        if t in known or args.force:
+            targets.append(t)
+        elif t in doc_ids:
+            return _die(f"{t} is a reference doc; a note's links must point at "
+                        f"notes. Link it from the doc side, or pass -f.")
+        else:
+            return _die(f"{t} matches no existing note. Check the id, or pass -f.")
+
+    m = re.search(r"(?m)^links: \[(.*)\]$", text)
+    if not m:
+        return _die(f"{path.name} has no links: line to extend")
+    have = [x.strip() for x in m.group(1).split(",") if x.strip()]
+    added = [t for t in targets if t not in have]
+    if not added:
+        print(f"{args.id}: already links {', '.join(targets)}")
+        return 0
+    merged = have + added
+    text = text[:m.start()] + f"links: [{', '.join(merged)}]" + text[m.end():]
+    path.write_text(text, encoding="utf-8")
+    print(f"{args.id} -> {', '.join(added)}")
+    _reindex_quiet()
+    return 0
+
+
 def cmd_discuss(args) -> int:
     matches = list(NOTES.glob(f"{args.id}*.md"))
     if not matches:
@@ -1402,6 +1483,13 @@ def main() -> int:
     st.add_argument("id")
     st.add_argument("value", help=f"one of: {', '.join(OPEN_STATUS + CLOSED_STATUS)}")
     st.set_defaults(fn=cmd_status)
+
+    ln = sub.add_parser("link", help="add links to an existing note")
+    ln.add_argument("id")
+    ln.add_argument("targets", nargs="+", help="note ids to link to")
+    ln.add_argument("-f", "--force", action="store_true",
+                    help="link a target that does not exist yet")
+    ln.set_defaults(fn=cmd_link)
 
     r = sub.add_parser("reindex", help="force a rebuild of the search index")
     r.set_defaults(fn=cmd_reindex)
