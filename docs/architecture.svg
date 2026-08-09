@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="620" viewBox="0 0 680 620" role="img" aria-labelledby="t d">
+<title id="t">grumpy architecture: gates at write, files as truth, index derived</title>
+<desc id="d">Several agents and people write with no coordination. Every write passes gates that refuse duplicates, over-length bodies, unknown tags and dangling links. Each note is one markdown file, so concurrent writers touch different files and git merges them without conflict. The files in git are the only source of truth; the SQLite full-text index is derived and rebuilt when a file changes, so a hand edit or a merge cannot corrupt anything. Reading walks a link graph that is symmetric.</desc>
+<style>
+  .b { stroke-width: 1; }
+  .g  { fill: #F1EFE8; stroke: #5F5E5A; }
+  .t  { fill: #E1F5EE; stroke: #0F6E56; }
+  .p  { fill: #EEEDFE; stroke: #534AB7; }
+  .th { font: 500 15px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #2C2C2A; }
+  .ts { font: 400 12.5px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #5F5E5A; }
+  .ln { stroke: #888780; stroke-width: 1.5; fill: none; }
+  @media (prefers-color-scheme: dark) {
+    .g { fill: #2C2C2A; stroke: #888780; }
+    .t { fill: #04342C; stroke: #1D9E75; }
+    .p { fill: #26215C; stroke: #7F77DD; }
+    .th { fill: #F1EFE8; }
+    .ts { fill: #B4B2A9; }
+    .ln { stroke: #888780; }
+  }
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#888780"/></marker></defs>
+
+<rect class="b g" x="60" y="16" width="170" height="44" rx="8"/>
+<text class="th" x="145" y="43" text-anchor="middle">agent</text>
+<rect class="b g" x="255" y="16" width="170" height="44" rx="8"/>
+<text class="th" x="340" y="43" text-anchor="middle">agent</text>
+<rect class="b g" x="450" y="16" width="170" height="44" rx="8"/>
+<text class="th" x="535" y="43" text-anchor="middle">a person</text>
+<text class="ts" x="340" y="80" text-anchor="middle">writing at the same time, with no coordination</text>
+
+<path class="ln" d="M145 60 L145 88 L340 88"/>
+<path class="ln" d="M535 60 L535 88 L340 88"/>
+<line class="ln" x1="340" y1="60" x2="340" y2="98" marker-end="url(#a)"/>
+
+<rect class="b t" x="110" y="100" width="460" height="56" rx="8"/>
+<text class="th" x="340" y="124" text-anchor="middle">refused at write</text>
+<text class="ts" x="340" y="144" text-anchor="middle">duplicate, length, tag, dangling link</text>
+<line class="ln" x1="340" y1="156" x2="340" y2="178" marker-end="url(#a)"/>
+
+<rect class="b t" x="110" y="180" width="460" height="56" rx="8"/>
+<text class="th" x="340" y="204" text-anchor="middle">one claim, one file</text>
+<text class="ts" x="340" y="224" text-anchor="middle">so two writers never collide</text>
+<line class="ln" x1="340" y1="236" x2="340" y2="258" marker-end="url(#a)"/>
+
+<rect class="b t" x="110" y="260" width="460" height="56" rx="8"/>
+<text class="th" x="340" y="284" text-anchor="middle">markdown in git</text>
+<text class="ts" x="340" y="304" text-anchor="middle">the only source of truth</text>
+<line class="ln" x1="340" y1="316" x2="340" y2="338" marker-end="url(#a)"/>
+<text class="ts" x="352" y="333">derived</text>
+
+<rect class="b p" x="110" y="340" width="460" height="56" rx="8"/>
+<text class="th" x="340" y="364" text-anchor="middle">SQLite full-text index</text>
+<text class="ts" x="340" y="384" text-anchor="middle">rebuilt on change, never authoritative</text>
+<line class="ln" x1="340" y1="396" x2="340" y2="418" marker-end="url(#a)"/>
+
+<rect class="b p" x="110" y="420" width="460" height="56" rx="8"/>
+<text class="th" x="340" y="444" text-anchor="middle">search, expand, context</text>
+<text class="ts" x="340" y="464" text-anchor="middle">links are symmetric on read</text>
+
+<text class="ts" x="110" y="502">teal: what is durable — purple: what is regenerated</text>
+
+<rect class="b g" x="60" y="514" width="180" height="80" rx="8"/>
+<text class="th" x="150" y="540" text-anchor="middle">light</text>
+<text class="ts" x="150" y="560" text-anchor="middle">1500 lines, stdlib only</text>
+<text class="ts" x="150" y="578" text-anchor="middle">no server, no embeddings</text>
+
+<rect class="b g" x="250" y="514" width="180" height="80" rx="8"/>
+<text class="th" x="340" y="540" text-anchor="middle">parallel</text>
+<text class="ts" x="340" y="560" text-anchor="middle">a file is the write unit</text>
+<text class="ts" x="340" y="578" text-anchor="middle">so git does the merging</text>
+
+<rect class="b g" x="440" y="514" width="180" height="80" rx="8"/>
+<text class="th" x="530" y="540" text-anchor="middle">it ages well</text>
+<text class="ts" x="530" y="560" text-anchor="middle">corrections attach in place</text>
+<text class="ts" x="530" y="578" text-anchor="middle">settled notes leave search</text>
+</svg>

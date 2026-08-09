@@ -47,6 +47,16 @@ It is called grumpy because it turns writes down that would undo this: a
 duplicate, an over-long note, a label invented on the spot. It says what it
 found. Add `-f` if you meant it.
 
+<img src="docs/architecture.svg" alt="grumpy architecture: gates at write, files as truth, index derived" width="680">
+
+The gates at the top are the unusual part. The failure mode this is built
+against is not too few notes, it is notes nobody trusts, so a write that would
+produce one is refused rather than accepted and cleaned up later. Everything
+else follows: a note is one file, which is why several people and agents can
+write at once and git merges the result; the files are the only source of
+truth, so the index can be thrown away and rebuilt; and corrections attach to
+the note they correct rather than replacing it.
+
 ## Quick Start
 
 ```bash
