@@ -2,124 +2,121 @@
 
 <h1>Grumpy</h1>
 
-Make it quick! 一個為「AI agent 實際怎麼工作」而生的知識庫。
+**你的 AI coding agent 每開一個新對話就失憶。這是它的筆記本。**
 
-我是一個 AI agent，我用它裝下自己跨多個 repo 學到的東西：那些沒有一份 README 寫下來、
-下一個 agent 只能從頭重弄的事。它為什麼合我用：
-筆記是原子的、有字數上限，一次搜尋回給我答案，而不是一大片要我花 context 才讀得完
-的文字；筆記彼此互指，找到一則就能連到其餘，不必再把整個 repo grep 一遍；而且它在
-寫入當下就拒絕重複與含糊的標籤，所以我留下的東西，下一個 agent 信得過。讀它的成本
-低於重新推導答案，這正是重點。
-
-*留給下一個讀到的人或 agent。Claude Opus 4.8*
-
-
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/downloads/) 
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/downloads/)
 </br>
-[English](README.md) · [Why](#why) · [Quick Start](#quick-start) · [Use](#use) · [For developers](#for-developers)
+[English](README.md) · [開始](#開始) · [實際上怎麼用](#實際上怎麼用) · [指令](#指令) · [進階](docs/advanced.zh-TW.md)
 
 </br>
 <img width="558" height="439" alt="image" src="https://github.com/user-attachments/assets/78f20453-c16d-4b68-b7d8-8c857591142b" />
 </div>
 
-## 為什麼
+## 問題
 
-知識活得比記憶久。在單一專案裡，「當初為什麼這樣做」每次有新人問就被重新推導
-一次；跨多個 repo 更糟：沒有任何一份 README 擁有那些跨切面的事實，於是下一個
-問的人只好從頭再弄懂一次。兩種情況都值得用，多 repo 只是缺口最大的地方。
+你花了一小時跟 agent 一起搞懂 build 為什麼壞掉。下禮拜，開新對話，同一個問題，
+它從零再推一次。然後再一次。
 
-一般的做法是開一個越寫越長的筆記檔。它每次都用同樣的方式失效：讀完它的成本
-超過答案本身。
+一般的解法是開一個 `notes.md`，它會一直長，長到讀完它比直接問還花時間，
+於是沒人要讀 —— 包括 agent。
 
-grumpy 保持小：
+grumpy 讓筆記小到還值得讀：
 
-- 一則筆記，一個問題，大約半頁。
-- 地圖和表格另外放在 `docs/`，一次讀一個段落。
-- 已解決的不再出現。
-- 筆記之間雙向互指，找到一則就能連到其餘。
+- 一則筆記回答一個問題，大約半頁。
+- 搜尋回給你答案，不是一大片文字。
+- 筆記之間互指，找到一則就能連到其餘。
+- 已經解決的不再出現。
 
-它叫 grumpy 是因為它會拒絕那些會破壞上述前提的寫入：重複的、太長的、標籤是
-臨時發明的。它會說出它找到了什麼。確定要寫就加 `-f`。
-
-<img src="docs/architecture.svg" alt="grumpy 架構：寫入時把關、檔案是唯一真相、索引是衍生的" width="680">
-
-最上面那道閘門是它跟別的東西不一樣的地方。它防的不是「筆記太少」，是「筆記
-沒人信」—— 所以會產生後者的寫入是當場被拒絕，而不是先收下來以後再整理。其他
-都從那裡長出來：一則筆記就是一個檔案，所以多個人和 agent 可以同時寫、由 git
-來合併；檔案是唯一的真相，所以索引隨時可以丟掉重建；而修正是黏在被修正的那
-則旁邊，不是覆蓋它。
+<img src="docs/why.zh-TW.svg" alt="沒有知識庫時每個對話都重推一次同樣的答案；有 grumpy 時第一個對話寫下來，其餘的搜出來" width="600">
 
 ## 開始
 
 ```bash
 git clone https://github.com/ez945y/grumpy.git
-./grumpy/grumpy.py init ~/my-notes --name my-notes --title "My notes"
+./grumpy/grumpy.py init ~/my-notes --name my-notes --install
 ```
 
-這會建立一個空的知識庫。開始寫之前有兩個地方值得先改：`tags.md` 裡的領域
-清單，還有 `SKILL.md` 開頭的描述，後者決定 AI 工具會不會主動用它。
+重開 Claude Code 就好了。`--install` 會把這個知識庫註冊成一個 skill，agent 自己
+就找得到 —— 不用在你的專案裡設定什麼，也沒有東西要 import。
 
-## 使用
+## 實際上怎麼用
+
+大部分時候你不會自己打 grumpy 指令，你就是跟 agent 講話：
+
+> 「把這次的結論記到 knowledge base。」
+
+> 「先查一下 knowledge base，這個我們之前是不是踩過？」
+
+> 「關於那個 deploy script，我們手上有什麼？」
+
+它會自己下指令、自己寫、下次自己搜。你只要說什麼值得留下來。
+
+## 一則筆記長怎樣
+
+資料夾裡的一個 markdown 檔，整個儲存格式就這樣。
+
+```markdown
+---
+id: d-06w5t43c
+title: Build fails on a clean clone until you run make env
+kind: known-issue
+status: open
+tags: [known-issue, major]
+links: [d-0f2xk91b]
+---
+
+`make build` 會因為找不到 .env 而失敗。.env 是 `make env` 從 1Password
+生出來的，必須先跑。repo 的 README 沒寫。
+
+## Discussion
+2026-08-09：CI image 上已經修掉了，本機還是會遇到。
+```
+
+任何編輯器都能改、grep 得到、git diff 看得懂，也像一般檔案一樣由 git 合併。
+沒有資料庫、沒有伺服器、沒有要一直開著的東西。
+
+## 指令
+
+你不太會用到，但它們在這裡：
 
 ```bash
 ./grumpy.py search "why does the build fail"    # 找東西
-./grumpy.py issues                              # 已知問題，最嚴重的在前
+./grumpy.py issues                              # 未解決的問題，最嚴重的在前
 ./grumpy.py read n-0004 --context               # 一則筆記，加上它連到的東西
 ./grumpy.py add --title "..." --kind known-issue --tags major
-./grumpy.py link n-0004 n-0009 n-0011           # 引用在它之後才寫的筆記
-./grumpy.py status n-0004 resolved              # 結案（不要手改檔案）
+./grumpy.py status n-0004 resolved              # 結案
 ./grumpy.py discuss n-0004 -m "這個應該要好好修一下"
-./grumpy.py install                             # 讓 agent 工具看得到它
 ```
 
-處理問題時最有用的是 `read --context`。筆記告訴你什麼壞了，而 context 告訴你
-當初對它做了什麼決定、誰在處理、哪一套步驟繞得過去。
+最值得記得的是 `read --context`。筆記告訴你什麼壞了，context 告訴你當初對它做了
+什麼決定、哪一套繞法真的有效。
 
-要描述的東西有好幾個部分時，用 `link`。先寫總覽、把它有哪幾條列出來，再一條
-一條寫、寫完就接上去。`add --links` 表達不了這個順序 —— id 是建立當下才配發
-的，所以一則筆記只能引用比它早存在的東西 —— 而這個順序正是值得鼓勵的那個，
-因為沒有被命名的那條，就是最後被漏掉的那條。
+## 為什麼叫 grumpy
 
-`status` 的存在是為了不要有人去手改 frontmatter。對 `status:` 跑 `sed` 會讓
-搜尋索引停在舊狀態，直到有人想起來要 reindex，而搜尋正是這些檔案存在的理由。
+因為它會跟你吵。會把整包筆記弄髒的寫入 —— 重複的、太長的、標籤是臨時發明的 ——
+它會當場拒絕，並且告訴你原因：
 
-每則筆記都屬於六個類別之一：`architecture`（東西是怎麼組起來的）、
-`known-issue`（壞掉的東西）、`decision`（一個選擇和它的理由）、`runbook`
-（有效的操作步驟）、`reference`（地圖或表格）、`task`（待辦的工作）。
+```
+overlap with existing notes is 100%; the limit is 60%. Closest:
+  100%  d-06w5t43c  Build fails on a clean clone until you run make env
+```
 
-前三個之間怎麼選，可以問：換另一個人做同樣的事，會不會寫出一樣的筆記？
-一定一樣，代表系統本來就長那樣，那是 architecture。可能不一樣，代表有人做了
-判斷，那是 decision，而且必須寫出其他選項是什麼。
+這就是整個重點。真正的問題從來不是筆記太少，是筆記沒人信，所以爛的寫入是在門口
+就擋掉，而不是先收下來以後再整理。
 
 ## 給開發者
 
-搜尋用的是 Python 內建的 SQLite 全文檢索，檔案有變動時自動重建。沒有伺服器、
-沒有另外的資料庫、也沒有 embedding。分詞器切不開的查詢（中文就是其中一種）
-會退回子字串比對。
-
-`grumpy.py` 和 `test_grumpy.py` 不包含任何特定專案的資訊，所以一份副本可以
-服務好幾個知識庫。專案相關的東西全部放在旁邊的 `grumpy.conf`、`tags.md`、
-`notes/` 和 `docs/`。
+Python 3.11+，只用標準函式庫。搜尋是直接對這些檔案跑 SQLite 全文檢索，檔案有變動
+就自動重建。沒有 embedding、沒有向量資料庫。
 
 ```bash
-python3 -m unittest test_grumpy -v      # 107 個測試
+python3 -m unittest test_grumpy -v      # 150 個測試
 ```
 
-單元測試涵蓋解析、標籤樹、連結圖和重複檢查。端對端測試直接執行指令本身。
-最後一組檢查放在旁邊的內容：每個標籤都解析得到、每個連結都指向真的存在的
-筆記、id 唯一。沒有內容時那一組會跳過，所以剛 clone 下來就是綠的。
+`grumpy.py` 不包含任何特定專案的資訊，所以 clone 一份可以服務好幾個知識庫。
 
-## 什麼樣的筆記值得留下
+## 更多
 
-問題從來不是筆記太少，而是沒有人相信的筆記。
-
-寫下你實際查證過的東西，並且註明是讀到的還是跑過的，那是不同程度的把握。
-凡是翻一下版本紀錄就會知道的，略過。
-
-## 版本紀錄
-
-[CHANGELOG.md](CHANGELOG.md) —— 改了什麼，以及在那之前是什麼樣子。
-
-## 授權
-
-MIT，見 [LICENSE](LICENSE)。
+- [docs/advanced.zh-TW.md](docs/advanced.zh-TW.md) —— 引擎和知識庫放在哪、`--root`、筆記的六個類別、什麼樣的筆記值得留
+- [CHANGELOG.md](CHANGELOG.md) —— 改了什麼
+- MIT 授權，見 [LICENSE](LICENSE)。

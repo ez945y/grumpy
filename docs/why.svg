@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="390" viewBox="0 0 600 390" role="img" aria-labelledby="t d">
+<title id="t">Without a knowledge base every chat re-derives the same answer; with grumpy the first chat writes it down and the rest look it up</title>
+<desc id="d">Top row: three chats, each spending an hour of digging, with the connection between them broken — every new chat starts from zero. Bottom row: the first chat still digs for an hour, but writes what it found into grumpy; the next chats find it with one search. The agent does the writing and the searching itself.</desc>
+<style>
+  .b  { stroke-width: 1; }
+  .g  { fill: #F1EFE8; stroke: #5F5E5A; }
+  .t  { fill: #E1F5EE; stroke: #0F6E56; }
+  .th { font: 500 15px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #2C2C2A; }
+  .ts { font: 400 12.5px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #5F5E5A; }
+  .sl { font: 500 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #888780; letter-spacing: .09em; }
+  .ln { stroke: #888780; stroke-width: 1.5; fill: none; }
+  .x  { stroke: #B4645A; stroke-width: 1.5; }
+  @media (prefers-color-scheme: dark) {
+    .g  { fill: #2C2C2A; stroke: #888780; }
+    .t  { fill: #04342C; stroke: #1D9E75; }
+    .th { fill: #F1EFE8; }
+    .ts { fill: #B4B2A9; }
+    .sl { fill: #888780; }
+    .x  { stroke: #D98B80; }
+  }
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#888780"/></marker></defs>
+
+<text class="sl" x="20" y="22">NO KNOWLEDGE BASE</text>
+
+<rect class="b g" x="20" y="44" width="160" height="64" rx="8"/>
+<text class="th" x="100" y="72" text-anchor="middle">chat 1</text>
+<text class="ts" x="100" y="92" text-anchor="middle">an hour of digging</text>
+
+<rect class="b g" x="220" y="44" width="160" height="64" rx="8"/>
+<text class="th" x="300" y="72" text-anchor="middle">chat 2</text>
+<text class="ts" x="300" y="92" text-anchor="middle">an hour of digging</text>
+
+<rect class="b g" x="420" y="44" width="160" height="64" rx="8"/>
+<text class="th" x="500" y="72" text-anchor="middle">chat 3</text>
+<text class="ts" x="500" y="92" text-anchor="middle">an hour of digging</text>
+
+<line class="ln" x1="184" y1="76" x2="192" y2="76"/>
+<line class="ln" x1="208" y1="76" x2="216" y2="76"/>
+<line class="x" x1="195" y1="71" x2="205" y2="81"/>
+<line class="x" x1="205" y1="71" x2="195" y2="81"/>
+<line class="ln" x1="384" y1="76" x2="392" y2="76"/>
+<line class="ln" x1="408" y1="76" x2="416" y2="76"/>
+<line class="x" x1="395" y1="71" x2="405" y2="81"/>
+<line class="x" x1="405" y1="71" x2="395" y2="81"/>
+
+<text class="ts" x="20" y="132">every new chat starts from zero</text>
+
+<text class="sl" x="20" y="178">WITH GRUMPY</text>
+
+<rect class="b g" x="20" y="196" width="160" height="64" rx="8"/>
+<text class="th" x="100" y="224" text-anchor="middle">chat 1</text>
+<text class="ts" x="100" y="244" text-anchor="middle">an hour of digging</text>
+
+<rect class="b g" x="220" y="196" width="160" height="64" rx="8"/>
+<text class="th" x="300" y="224" text-anchor="middle">chat 2</text>
+<text class="ts" x="300" y="244" text-anchor="middle">one search</text>
+
+<rect class="b g" x="420" y="196" width="160" height="64" rx="8"/>
+<text class="th" x="500" y="224" text-anchor="middle">chat 3</text>
+<text class="ts" x="500" y="244" text-anchor="middle">one search</text>
+
+<line class="ln" x1="100" y1="262" x2="100" y2="302" marker-end="url(#a)"/>
+<text class="ts" x="112" y="286">writes it down</text>
+<line class="ln" x1="300" y1="304" x2="300" y2="264" marker-end="url(#a)"/>
+<text class="ts" x="312" y="286">looks it up</text>
+<line class="ln" x1="500" y1="304" x2="500" y2="264" marker-end="url(#a)"/>
+
+<rect class="b t" x="20" y="306" width="560" height="52" rx="8"/>
+<text class="th" x="300" y="330" text-anchor="middle">grumpy</text>
+<text class="ts" x="300" y="348" text-anchor="middle">small markdown notes, in git, searchable</text>
+
+<text class="ts" x="20" y="382">the agent does both — you just say what is worth keeping</text>
+</svg>
