@@ -88,11 +88,22 @@ You'll rarely need these, but they're there:
 ./grumpy.py add --title "..." --kind known-issue --tags major
 ./grumpy.py status n-0004 resolved              # close it
 ./grumpy.py discuss n-0004 -m "we should fix this properly"
+./grumpy.py handoff n-0004                      # everything needed to act on it
 ```
 
 `read --context` is the one worth knowing. The note tells you what's broken;
 the context tells you what was decided about it and which workaround actually
 works.
+
+`handoff` is the one to hand an agent. It prints the task, every decision and
+defect it links to quoted in full, and then — computed at that moment, stored
+nowhere — each named repo's HEAD, its uncommitted files, and what is running.
+The alternative is a HANDOFF.md maintained by hand, which rots the same way
+every time: it records a present state that a later commit falsifies, and
+nothing makes it wrong out loud. Anything that goes stale is therefore read at
+handoff time rather than written down. The exception is policy, which cannot be
+derived from a repo: put that in `handoff.rules` beside `grumpy.conf`, and set
+`workspace` there so the repo section has somewhere to look.
 
 ## Why "grumpy"
 

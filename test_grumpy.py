@@ -508,6 +508,55 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(doc["id"], f"{self.ids[0]}")
         self.assertIn("anchor body", doc["body"])
 
+    # -- handoff -----------------------------------------------------------
+
+    def test_handoff_reads_a_linked_decision_in_full(self):
+        self.kb("add", "--title", "Ports are ours", "--kind", "decision",
+                "--body", "8087 and nothing else. Rejected: reusing 8097.")
+        self.kb("add", "--title", "Move the routes", "--kind", "task",
+                "--tags", "blocker", "--links", self.ids[0],
+                "--body", "the routes have not moved")
+        out = self.kb("handoff", self.ids[1], "--brief")
+        self.assertIn("HANDOFF \u2014 Move the routes", out)
+        self.assertIn("the routes have not moved", out)
+        # Quoted rather than merely named: a handoff that names a decision
+        # invites the reader to re-make it.
+        self.assertIn("Rejected: reusing 8097.", out)
+
+    def test_handoff_quotes_only_the_title_of_a_non_decision(self):
+        self.kb("add", "--title", "How the seam reads", "--kind", "architecture",
+                "--body", "SOME LONG ARCHITECTURE BODY")
+        self.kb("add", "--title", "Own the identity", "--kind", "task",
+                "--tags", "blocker", "--links", self.ids[0], "--body", "do it")
+        out = self.kb("handoff", self.ids[1], "--brief")
+        self.assertIn("How the seam reads", out)
+        self.assertNotIn("SOME LONG ARCHITECTURE BODY", out)
+
+    def test_handoff_falls_back_to_search_when_the_id_is_words(self):
+        self.kb("add", "--title", "Publish API is missing", "--kind", "task",
+                "--tags", "blocker", "--body", "forge has nowhere to publish")
+        out = self.kb("handoff", "nowhere to publish", "--brief")
+        self.assertIn("Publish API is missing", out)
+
+    def test_handoff_says_so_when_nothing_matches(self):
+        out = self.kb("handoff", "a subject nobody wrote about", expect=2)
+        self.assertIn("cannot invent the task", out)
+
+    def test_handoff_carries_the_rules_without_their_maintenance_comments(self):
+        (self.tmp / "handoff.rules").write_text(
+            "# how to maintain this file\n1. Never force-push.\n", encoding="utf-8")
+        self.kb("add", "--title", "Anything", "--kind", "task", "--tags", "blocker",
+                "--body", "b")
+        out = self.kb("handoff", self.ids[0], "--brief")
+        self.assertIn("Never force-push.", out)
+        self.assertNotIn("how to maintain this file", out)
+
+    def test_handoff_without_rules_says_the_constraints_are_unrecorded(self):
+        self.kb("add", "--title", "Anything", "--kind", "task", "--tags", "blocker",
+                "--body", "b")
+        out = self.kb("handoff", self.ids[0], "--brief")
+        self.assertIn("unrecorded", out)
+
     # -- search ------------------------------------------------------------
 
     def _seed(self) -> None:

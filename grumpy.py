@@ -21,6 +21,7 @@ import os
 import re
 import secrets
 import sqlite3
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -1381,6 +1382,152 @@ def cmd_reindex(_args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Handoff
+#
+# One briefing an agent can act on, assembled rather than maintained.
+#
+# The alternative — a HANDOFF.md kept up to date by hand — fails the same way
+# every time: it records a present state ("the service runs on 5174", "the
+# other stack is up") that a later commit falsifies, and nothing makes the
+# document wrong out loud. So this splits the content by how it ages.
+#
+#   read from the KB   the task, the decisions constraining it, the file:line
+#                      evidence. Claims about the past; they stay true, and
+#                      they are already maintained here.
+#   computed now       what is committed, what is UNCOMMITTED, what is running.
+#                      Stored nowhere. Wrong for the seconds until the next run.
+#   handoff.rules      policy, which cannot be derived from any repo because it
+#                      is somebody's decision about how the work is done. The
+#                      only hand-written part, and it lives in the base beside
+#                      grumpy.conf, because policy is per-knowledge-base.
+# ---------------------------------------------------------------------------
+
+def _git(path: Path, *args: str) -> str:
+    """Never raises. A handoff that dies because one repo is mid-rebase is
+    worse than a handoff with one blank section."""
+    try:
+        r = subprocess.run(["git", "-C", str(path), *args],
+                           capture_output=True, text=True, timeout=20)
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _repo_state(name: str, root: Path) -> str | None:
+    path = root / name
+    if not (path / ".git").is_dir():
+        return None
+    branch = _git(path, "rev-parse", "--abbrev-ref", "HEAD") or "detached"
+    log = _git(path, "log", "--oneline", "-3") or "(no commits)"
+    dirty = _git(path, "status", "--short")
+    out = [f"### {name}  ({branch})", "", "recent:"]
+    out += ["  " + l for l in log.splitlines()]
+    if dirty:
+        # Called out rather than listed quietly. Uncommitted work in a repo you
+        # are about to edit is either another live session or a dead agent's
+        # leftovers, and committing someone else's half-finished change is the
+        # expensive mistake this line exists to prevent.
+        out += ["", "UNCOMMITTED — find out whose before you touch these files:"]
+        out += ["  " + l for l in dirty.splitlines()[:25]]
+    else:
+        out += ["", "working tree clean"]
+    return "\n".join(out)
+
+
+def _running(pattern: str) -> str:
+    try:
+        r = subprocess.run(["docker", "ps", "--format",
+                            "{{.Names}}\t{{.Status}}\t{{.Ports}}"],
+                           capture_output=True, text=True, timeout=20)
+    except Exception:
+        return "  (docker not reachable)"
+    keep = [l for l in r.stdout.splitlines() if re.search(pattern, l, re.I)] \
+        if pattern else r.stdout.splitlines()
+    return "\n".join("  " + l for l in keep) or "  (nothing matching is running)"
+
+
+def cmd_handoff(args) -> int:
+    e = find_entry(args.id)
+    if not e:
+        # Falling back to search rather than failing: the caller usually knows
+        # the work by name, not by id, and "no note matches" is a useful answer
+        # only after the search has also come up empty.
+        con = build_index()
+        like = f"%{args.id.strip()}%"
+        row = con.execute(
+            "SELECT id FROM notes WHERE title LIKE ? OR body LIKE ? "
+            "ORDER BY coll DESC, id LIMIT 1", (like, like)).fetchone()
+        if row:
+            e = find_entry(row[0])
+    if not e:
+        return _die(f"nothing in this base matches {args.id!r}. Widen it, or write "
+                    f"the note first — a handoff cannot invent the task.")
+
+    by_id = {x["id"]: x for x in all_notes() + all_docs()}
+    out = ["=" * 78,
+           f"HANDOFF — {e['title']}",
+           f"source: {e['id']} ({e['kind']}, {e['status']})",
+           "=" * 78]
+
+    rules = ROOT / "handoff.rules"
+    out.append("\n## Standing rules\n")
+    if rules.exists():
+        # `#` lines address whoever MAINTAINS the rules. The agent being handed
+        # the work needs the rules themselves, and padding the top of a
+        # briefing with meta-commentary is how the top stops being read.
+        body = [l for l in rules.read_text().splitlines()
+                if not l.lstrip().startswith("#")]
+        out.append("\n".join(body).strip())
+    else:
+        out.append(f"(no {rules.name} in this base — standing constraints are "
+                   f"unrecorded, so an agent will find them by breaking one)")
+
+    out.append("\n\n## The work\n")
+    out.append(e["body"].strip())
+
+    links = [l for l in (e.get("links") or []) if l in by_id]
+    if links:
+        out.append("\n\n## What constrains it\n")
+        for lid in links:
+            ln = by_id[lid]
+            out.append(f"### {lid} — {ln['title']}  [{ln['kind']}]")
+            if ln["kind"] in ("decision", "known-issue"):
+                # In full: a handoff that only NAMES a decision invites the
+                # reader to re-make it, and naming a defect without its
+                # workaround invites them to rediscover it.
+                out.append(ln["body"].strip())
+            else:
+                out.append(f"    ({_self()} read {lid})")
+            out.append("")
+
+    if not args.brief:
+        out.append("\n## Ground truth, as of now\n")
+        out.append("Computed when you ran this. Stored nowhere.\n")
+        root = Path(args.workspace).expanduser() if args.workspace \
+            else Path(conf().get("workspace", "")).expanduser()
+        if str(root) not in ("", "."):
+            for name in e.get("repos") or []:
+                st = _repo_state(name, root)
+                if st:
+                    out += [st, ""]
+        else:
+            out.append("(no `workspace` in grumpy.conf and no --workspace, so "
+                       "repo state is unavailable — set it to where the repos "
+                       "named in `repos:` are checked out)\n")
+        out.append("### running services")
+        out.append(_running(conf().get("handoff_services", "")))
+
+    out += ["\n" + "=" * 78,
+            "Finishing means writing back:",
+            f"  {_self()} discuss {e['id']} -m \"...\"   what happened here",
+            f"  {_self()} add --title ... --kind ...   a finding of its own",
+            "A knowledge base that is only ever read decays into fiction.",
+            "=" * 78]
+    print("\n".join(out))
+    return 0
+
+
 def _die(msg: str) -> int:
     print(msg, file=sys.stderr)
     return 2
@@ -1501,6 +1648,17 @@ def main() -> int:
     ln.add_argument("-f", "--force", action="store_true",
                     help="link a target that does not exist yet")
     ln.set_defaults(fn=cmd_link)
+
+    ho = sub.add_parser("handoff",
+                        help="one briefing an agent can act on: the task, its "
+                             "constraints, and the state of things right now")
+    ho.add_argument("id", help="note id, or words to search for")
+    ho.add_argument("--brief", action="store_true",
+                    help="skip the computed section (no git, no docker)")
+    ho.add_argument("--workspace", metavar="PATH",
+                    help="where the repos named in `repos:` are checked out "
+                         "(default: `workspace` in grumpy.conf)")
+    ho.set_defaults(fn=cmd_handoff)
 
     r = sub.add_parser("reindex", help="force a rebuild of the search index")
     r.set_defaults(fn=cmd_reindex)

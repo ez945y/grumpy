@@ -8,6 +8,37 @@ Dates are the day the work landed on `main`. Versions start here; everything
 before 0.3.0 is reconstructed from the history and grouped rather than
 pretended to be a release.
 
+## 0.4.0 — 2026-08-12
+
+### `handoff`: assemble the briefing instead of maintaining one
+
+One command that prints everything an agent needs to pick up one piece of work:
+the task note in full, every decision and defect it links to quoted rather than
+merely named, and then the state of the repos and services it touches.
+
+The thing it replaces is a hand-written HANDOFF.md, and the reason it replaces
+it is that those rot in a specific, predictable way. They record a present
+state — this port, that service is up, this branch is where the work is — and a
+later commit falsifies it silently. Nothing about a stale sentence in a
+markdown file looks stale.
+
+So the content is split by how it ages. Claims about the past (the task, the
+decision behind it, the file:line) are already maintained as notes and are read
+from there. Claims about the present (HEAD, uncommitted files, running
+containers) are computed when you ask and stored nowhere, so the worst they can
+be is seconds out of date. Uncommitted files are called out rather than listed
+quietly, because in a workspace with several agents they are usually somebody
+else's and committing them is the expensive mistake.
+
+Policy is the third kind and cannot be derived from any repo: it goes in
+`handoff.rules` beside `grumpy.conf`, where `#` lines are for whoever maintains
+the rules and are stripped from the briefing.
+
+Two new `grumpy.conf` keys, both optional: `workspace` (where the directories
+named in `repos:` live) and `handoff_services` (a regex deciding which
+containers are this project's, so the section is not every container on the
+box).
+
 ## 0.3.0 — 2026-08-09
 
 Three frictions, all found the same way: an agent wrote seven notes in one
