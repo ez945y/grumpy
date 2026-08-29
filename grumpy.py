@@ -19,6 +19,7 @@ import datetime as _dt
 import json
 import os
 import re
+import math
 import secrets
 import sqlite3
 import subprocess
@@ -158,7 +159,7 @@ def mint_id(pre: str, today: _dt.date | None = None) -> str:
     is a coin flip somewhere around 180 notes in a day. 32**5 is 33.5M, which
     puts a realistic team's daily output back into the noise.
     """
-    day = ((today or _dt.date.today()) - ID_EPOCH).days
+    day = ((today or __dt.date.today()) - ID_EPOCH).days
     rand = "".join(secrets.choice(ID_ALPHABET) for _ in range(5))
     return f"{pre}-{_b32(max(day, 0), 3)}{rand}"
 
@@ -488,7 +489,14 @@ def build_index(force: bool = False) -> sqlite3.Connection:
 # Commands
 # ---------------------------------------------------------------------------
 
-def cmd_search(args) -> int:
+def _search_rows(args):
+    """The filtered row set. Extracted so `graph` can take the same filters.
+
+    Sharing this rather than reimplementing it is the whole reason `graph` is
+    cheap to learn: it is search, drawn. Two copies of the filter logic would
+    drift, and the drift would show up as a picture quietly disagreeing with
+    the listing it was supposed to illustrate.
+    """
     tags = load_tags()
     con = build_index()
 
@@ -549,7 +557,11 @@ def cmd_search(args) -> int:
         if not args.all and not args.status and status in CLOSED_STATUS:
             continue
         out.append((nid, title, kind, status, ntags, nrepos, coll))
+    return out
 
+
+def cmd_search(args) -> int:
+    out = _search_rows(args)
     if not out:
         print("no matches")
         return 1
@@ -573,8 +585,21 @@ def cmd_search(args) -> int:
         pad = " " * len(prefix)
         flag = "" if status == "open" else f" [{status}]"
         via = f"   (via {origin})" if origin else ""
-        print(f"{prefix}{nid}  {title}{flag}{via}")
+        # A corrected note has to say so HERE, in the listing, not only in its
+        # body. `discuss` already appends and is already indexed, because body
+        # is everything after the frontmatter, so a correction has always been
+        # findable. What it was not is visible: a search prints titles, and a
+        # title asserting something later disproven reads as confident and
+        # current. That is worse than having no note at all.
+        n = by_id.get(nid) or {}
+        corrected = n.get("corrected")
+        mark = f"  ** CORRECTED {corrected} **" if corrected else ""
+        print(f"{prefix}{nid}  {title}{flag}{via}{mark}")
         print(f"{pad}    kind={kind}  tags={ntags or '-'}  repos={nrepos or '-'}")
+        if corrected:
+            line = _first_correction(n.get("body", ""))
+            if line:
+                print(f"{pad}    {line}")
         if coll == "doc":
             # Never print a doc's body here. The point of the docs tier is that
             # a reader spends context on the outline first and pulls only the
@@ -718,7 +743,7 @@ def cmd_add(args) -> int:
             f"status: {args.status}\nsummary: {args.summary}\n"
             f"tags: [{', '.join(given)}]\n"
             f"repos: [{', '.join(r.strip() for r in (args.repos or '').split(',') if r.strip())}]\n"
-            f"links: [{', '.join(link_ids)}]\ncreated: {_dt.date.today()}\n---\n\n{body}\n",
+            f"links: [{', '.join(link_ids)}]\ncreated: {__dt.date.today()}\n---\n\n{body}\n",
             encoding="utf-8")
         if args.json:
             print(json.dumps({"id": nid, "path": str(path.relative_to(ROOT)),
@@ -767,7 +792,7 @@ def cmd_add(args) -> int:
         f"tags: [{', '.join(given)}]\n"
         f"repos: [{repos}]\n"
         f"links: [{', '.join(link_ids)}]\n"
-        f"created: {_dt.date.today()}\n"
+        f"created: {__dt.date.today()}\n"
         f"---\n\n{body}\n\n## Discussion\n",
         encoding="utf-8",
     )
@@ -1262,6 +1287,319 @@ def _reindex_quiet() -> None:
         pass
 
 
+CORRECTION_MARK = "**Corrected"
+
+# ---------------------------------------------------------------------------
+# graph
+#
+# The link graph is the one thing the CLI cannot show. `search --expand` walks
+# it one hop at a time, which answers "what is next to this" and never answers
+# "what shape is this area".
+#
+# Two decisions worth stating, because both are departures from what a graph
+# tool usually does.
+#
+# **The same filters as search, and no default of everything.** A base with two
+# hundred notes drawn whole is a hairball that answers nothing. `graph --tag
+# esp32` is the useful invocation, and it is the useful one precisely because
+# it is `search --tag esp32` rendered differently rather than a second mental
+# model to learn.
+#
+# **Deterministic layout, not force-directed.** A force simulation settles
+# somewhere new on every run, so the SVG churns and the diff is noise. Grouping
+# by repo and ordering within the group makes the same input draw the same
+# picture forever, which is what lets the file be committed and reviewed like
+# any other artifact. It also happens to match how people ask: the question is
+# almost always "what touches anvil", not "what is central".
+#
+# Corrections are a node property, not an edge. An earlier sketch of this drew
+# them as bold edges between a claim and the thing that overturned it, but the
+# data has no such relation - `correct` records that a note was wrong, not what
+# proved it. Drawing an edge that does not exist would be inventing evidence.
+# ---------------------------------------------------------------------------
+
+KIND_SHAPE = {
+    "architecture": "circle", "decision": "diamond", "known-issue": "triangle",
+    "task": "square", "runbook": "hex", "reference": "doc",
+}
+SEV_FILL = {"blocker": "#c0392b", "major": "#e67e22", "minor": "#f1c40f"}
+
+
+def _graph_model(entries, rows):
+    """Nodes and edges for the filtered set, with everything the render needs."""
+    keep = {r[0] for r in rows}
+    by_id = {e["id"]: e for e in entries}
+    graph = link_graph(entries)
+
+    nodes = []
+    for nid in sorted(keep):
+        e = by_id.get(nid, {})
+        tags = e.get("tags", [])
+        sev = next((t for t in tags if t in SEV_FILL), "")
+        deg = len([x for x in graph.get(nid, ()) if x in keep])
+        nodes.append({
+            "id": nid, "title": e.get("title", nid), "kind": e.get("kind", "note"),
+            "status": e.get("status", "open"), "sev": sev,
+            "repos": e.get("repos", []), "tags": tags,
+            "corrected": e.get("corrected", ""), "deg": deg,
+            "coll": "doc" if e.get("summary") is not None else "note",
+        })
+    edges = sorted({tuple(sorted((a, b)))
+                    for a in keep for b in graph.get(a, ()) if b in keep})
+    return nodes, [{"a": a, "b": b} for a, b in edges]
+
+
+def _graph_layout(nodes):
+    """Columns by repo, rows by kind then id. Same input, same picture."""
+    col_of, cols = {}, []
+    for n in nodes:
+        key = n["repos"][0] if n["repos"] else "(no repo)"
+        if key not in col_of:
+            col_of[key] = len(cols)
+            cols.append(key)
+        n["_col"] = col_of[key]
+    per = {}
+    for n in sorted(nodes, key=lambda n: (n["_col"], n["kind"], n["id"])):
+        i = per.setdefault(n["_col"], 0)
+        per[n["_col"]] = i + 1
+        n["x"] = 130 + n["_col"] * 260
+        n["y"] = 110 + i * 46
+    height = 160 + max([0] + list(per.values())) * 46
+    return cols, len(cols) * 260 + 120, height
+
+
+
+def _svg_node(n) -> str:
+    """One node. Shape says kind, fill says severity, ring says corrected."""
+    x, y = n["x"], n["y"]
+    r = 7 + min(n["deg"], 6)
+    fill = SEV_FILL.get(n["sev"], "#7f8c8d")
+    if n["status"] in CLOSED_STATUS:
+        fill, op = "#bdc3c7", 0.45
+    else:
+        op = 1.0
+    sh = KIND_SHAPE.get(n["kind"], "circle")
+    if sh == "diamond":
+        g = f'<polygon points="{x},{y-r} {x+r},{y} {x},{y+r} {x-r},{y}"'
+    elif sh == "triangle":
+        g = f'<polygon points="{x},{y-r} {x+r},{y+r} {x-r},{y+r}"'
+    elif sh == "square":
+        g = f'<rect x="{x-r}" y="{y-r}" width="{2*r}" height="{2*r}" rx="2"'
+    elif sh == "hex":
+        pts = " ".join(f"{x+r*math.cos(math.radians(a)):.1f},{y+r*math.sin(math.radians(a)):.1f}"
+                       for a in range(0, 360, 60))
+        g = f'<polygon points="{pts}"'
+    elif sh == "doc":
+        g = f'<rect x="{x-r}" y="{y-r*0.8:.1f}" width="{2*r}" height="{1.6*r:.1f}"'
+    else:
+        g = f'<circle cx="{x}" cy="{y}" r="{r}"'
+    out = [f'{g} fill="{fill}" fill-opacity="{op}" stroke="#2c3e50" stroke-width="1"/>']
+    if n["corrected"]:
+        # The one thing that must survive being skimmed.
+        out.append(f'<circle cx="{x}" cy="{y}" r="{r+4}" fill="none" '
+                   f'stroke="#c0392b" stroke-width="2.5"/>')
+    label = _esc(n["title"])[:44]
+    out.append(f'<text x="{x+r+6}" y="{y+4}" font-size="10" fill="#2c3e50">'
+               f'{label}</text>')
+    out.append(f'<title>{_esc(n["id"])}  {_esc(n["title"])}\n'
+               f'{n["kind"]} / {n["status"]}'
+               + (f'\nCORRECTED {n["corrected"]}' if n["corrected"] else '') + '</title>')
+    return "".join(out)
+
+
+def _esc(t: str) -> str:
+    return (str(t).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _first_correction(body: str) -> str:
+    """The first line of the most recent correction, for the listing.
+
+    Read from the body rather than stored in the frontmatter on purpose: one
+    copy, and it cannot drift from the text it summarises.
+    """
+    for para in reversed(body.split("\n\n")):
+        para = para.strip()
+        if para.startswith(CORRECTION_MARK):
+            line = para.splitlines()[0].strip()
+            return line if len(line) <= 160 else line[:157] + "..."
+    return ""
+
+
+_HTML_SHELL = """<!doctype html><meta charset="utf-8"><title>grumpy graph</title>
+<style>
+ body{margin:0;font:13px ui-sans-serif,system-ui,sans-serif;background:#fbfbfa;color:#2c3e50}
+ #bar{padding:8px 12px;border-bottom:1px solid #e3e3e0;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+ #bar label{cursor:pointer;user-select:none}
+ #tip{position:fixed;pointer-events:none;background:#2c3e50;color:#fff;padding:6px 8px;
+      border-radius:4px;max-width:380px;display:none;font-size:12px;line-height:1.4;z-index:9}
+ .n{cursor:pointer}.dim{opacity:.12}
+ svg{display:block}
+</style>
+<div id=bar></div><svg id=g></svg><div id=tip></div>
+<script>
+const D=__DATA__, W=__W__, H=__H__;
+const svg=document.getElementById('g'), tip=document.getElementById('tip');
+svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('width',W); svg.setAttribute('height',H);
+const SEV={blocker:'#c0392b',major:'#e67e22',minor:'#f1c40f'};
+const CLOSED=['resolved','fixed','done','wontfix','duplicate','obsolete'];
+const pos={}; D.nodes.forEach(n=>pos[n.id]=[n.x,n.y]);
+const adj={}; D.edges.forEach(e=>{(adj[e.a]=adj[e.a]||[]).push(e.b);(adj[e.b]=adj[e.b]||[]).push(e.a)});
+const kinds=[...new Set(D.nodes.map(n=>n.kind))].sort();
+const off=new Set();
+function el(t,a){const e=document.createElementNS('http://www.w3.org/2000/svg',t);
+  for(const k in a)e.setAttribute(k,a[k]);return e}
+function draw(){
+  svg.innerHTML='';
+  svg.appendChild(el('rect',{width:W,height:H,fill:'#fbfbfa'}));
+  D.cols.forEach((c,i)=>{const t=el('text',{x:130+i*260,y:52,'font-size':13,
+    'font-weight':600,fill:'#34495e'});t.textContent=c;svg.appendChild(t)});
+  const on=n=>!off.has(n.kind);
+  D.edges.forEach(e=>{const A=D.nodes.find(n=>n.id==e.a),B=D.nodes.find(n=>n.id==e.b);
+    if(!A||!B||!on(A)||!on(B))return;
+    const[x1,y1]=pos[e.a],[x2,y2]=pos[e.b],mx=(x1+x2)/2+(x1!=x2?40:0);
+    svg.appendChild(el('path',{d:`M${x1},${y1} Q${mx},${(y1+y2)/2} ${x2},${y2}`,
+      fill:'none',stroke:'#95a5a6','stroke-width':0.9,'stroke-opacity':0.55,class:'e','data-a':e.a,'data-b':e.b}))});
+  D.nodes.filter(on).forEach(n=>{
+    const r=7+Math.min(n.deg,6), settled=CLOSED.includes(n.status);
+    const g=el('g',{class:'n','data-id':n.id});
+    let sh;
+    if(n.kind=='decision')sh=el('polygon',{points:`${n.x},${n.y-r} ${n.x+r},${n.y} ${n.x},${n.y+r} ${n.x-r},${n.y}`});
+    else if(n.kind=='known-issue')sh=el('polygon',{points:`${n.x},${n.y-r} ${n.x+r},${n.y+r} ${n.x-r},${n.y+r}`});
+    else if(n.kind=='task')sh=el('rect',{x:n.x-r,y:n.y-r,width:2*r,height:2*r,rx:2});
+    else sh=el('circle',{cx:n.x,cy:n.y,r:r});
+    sh.setAttribute('fill',settled?'#bdc3c7':(SEV[n.sev]||'#7f8c8d'));
+    sh.setAttribute('fill-opacity',settled?0.45:1);
+    sh.setAttribute('stroke','#2c3e50');sh.setAttribute('stroke-width',1);
+    g.appendChild(sh);
+    if(n.corrected)g.appendChild(el('circle',{cx:n.x,cy:n.y,r:r+4,fill:'none',
+      stroke:'#c0392b','stroke-width':2.5}));
+    const t=el('text',{x:n.x+r+6,y:n.y+4,'font-size':10,fill:'#2c3e50'});
+    t.textContent=n.title.slice(0,44);g.appendChild(t);
+    g.onmousemove=ev=>{tip.style.display='block';tip.style.left=(ev.clientX+14)+'px';
+      tip.style.top=(ev.clientY+14)+'px';
+      tip.innerHTML=`<b>${n.id}</b><br>${n.title}<br>${n.kind} / ${n.status}`+
+        (n.corrected?`<br><span style="color:#ff8a80">CORRECTED ${n.corrected}</span>`:'')+
+        (n.repos.length?`<br>repos: ${n.repos.join(' ')}`:'')};
+    g.onmouseleave=()=>tip.style.display='none';
+    g.onclick=()=>focus(n.id);
+    svg.appendChild(g)});
+}
+function focus(id){
+  const keep=new Set([id,...(adj[id]||[])]);
+  document.querySelectorAll('.n').forEach(g=>
+    g.classList.toggle('dim',!keep.has(g.dataset.id)));
+  document.querySelectorAll('.e').forEach(p=>
+    p.classList.toggle('dim',!(keep.has(p.dataset.a)&&keep.has(p.dataset.b))));
+}
+svg.addEventListener('dblclick',()=>document.querySelectorAll('.dim')
+  .forEach(e=>e.classList.remove('dim')));
+const bar=document.getElementById('bar');
+bar.innerHTML=`<b>${D.nodes.length} notes, ${D.edges.length} links</b>
+ <span style="color:#7f8c8d">click a node to isolate it, double-click the background to reset</span>`;
+kinds.forEach(k=>{const l=document.createElement('label');
+  l.innerHTML=`<input type=checkbox checked> ${k}`;
+  l.querySelector('input').onchange=e=>{e.target.checked?off.delete(k):off.add(k);draw()};
+  bar.appendChild(l)});
+draw();
+</script>"""
+
+
+def cmd_graph(args) -> int:
+    """Draw the filtered link graph. Static SVG by default, --html to explore.
+
+    Takes the same filters as search on purpose: this is search rendered
+    differently, not a second thing to learn. `graph --tag esp32 > g.svg` is
+    the shape of the invocation that gets used.
+    """
+    rows = _search_rows(args)
+    if not rows:
+        print("no matches", file=sys.stderr)
+        return 1
+    entries = all_notes() + all_docs()
+    nodes, edges = _graph_model(entries, rows)
+    cols, w, h = _graph_layout(nodes)
+    pos = {n["id"]: (n["x"], n["y"]) for n in nodes}
+
+    if args.html:
+        payload = json.dumps({"nodes": nodes, "edges": edges, "cols": cols},
+                             ensure_ascii=False)
+        print(_HTML_SHELL.replace("__DATA__", payload)
+              .replace("__W__", str(w)).replace("__H__", str(h)))
+        return 0
+
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
+           f'width="{w}" height="{h}" font-family="ui-sans-serif,system-ui,sans-serif">',
+           f'<rect width="{w}" height="{h}" fill="#fbfbfa"/>']
+    for i, c in enumerate(cols):
+        out.append(f'<text x="{130 + i*260}" y="52" font-size="13" font-weight="600" '
+                   f'fill="#34495e">{_esc(c)}</text>')
+    for e in edges:
+        (x1, y1), (x2, y2) = pos[e["a"]], pos[e["b"]]
+        mx = (x1 + x2) / 2 + (40 if x1 != x2 else 0)
+        out.append(f'<path d="M{x1},{y1} Q{mx:.0f},{(y1+y2)/2:.0f} {x2},{y2}" '
+                   f'fill="none" stroke="#95a5a6" stroke-width="0.9" stroke-opacity="0.55"/>')
+    for n in nodes:
+        out.append(_svg_node(n))
+    out.append(f'<text x="16" y="{h-16}" font-size="10" fill="#7f8c8d">'
+               f'{len(nodes)} notes, {len(edges)} links  |  '
+               f'circle=architecture diamond=decision triangle=known-issue '
+               f'square=task hex=runbook  |  red ring=corrected  |  '
+               f'fill=severity, faded=settled</text>')
+    out.append("</svg>")
+    print("\n".join(out))
+    return 0
+
+
+def cmd_correct(args) -> int:
+    """Record that a note's claim has been disproven, where a reader will meet it.
+
+    This is deliberately NOT a status. `status` is the lifecycle axis: whether
+    something is still live. Being corrected is orthogonal to that - an
+    architecture note is never "resolved", and a known-issue can be both open
+    and wrong about why. Folding the two together would mean closing a note to
+    say it was mistaken, which hides it.
+
+    So it is its own frontmatter key, and the only behaviour it buys is
+    visibility: every listing carries the flag and the first line of the
+    correction. The text itself is appended the same way `discuss` appends,
+    and is indexed the same way, because body is everything after the
+    frontmatter.
+
+    Correct rather than delete. The disproven claim and the reason it was
+    plausible are the useful part; a note that quietly changed its mind
+    teaches nobody why the mistake was easy to make.
+    """
+    matches = list(NOTES.glob(f"{args.id}*.md"))
+    if not matches:
+        return _die(f"no note matching {args.id!r}")
+    # Same contract as add and discuss: a piped or heredoc body wins, -m is the
+    # shortcut. Backticks in -m become command substitution in the shell, so the
+    # heredoc is the safer way to pass prose.
+    text = args.message
+    if not text and not sys.stdin.isatty():
+        text = sys.stdin.read()
+    if not text or not text.strip():
+        return _die("a correction needs text: -m \"...\" or a heredoc")
+
+    path = matches[0]
+    raw = path.read_text(encoding="utf-8")
+    stamp = _dt.date.today().isoformat()
+
+    if re.search(r"(?m)^corrected: ", raw):
+        raw = re.sub(r"(?m)^corrected: .*$", f"corrected: {stamp}", raw, count=1)
+    else:
+        raw, n = re.subn(r"(?m)^(status: .*)$", rf"\1\ncorrected: {stamp}", raw, count=1)
+        if not n:
+            return _die(f"{path.name} has no status: line to anchor the marker on")
+
+    raw = raw.rstrip("\n") + f"\n\n{CORRECTION_MARK} {stamp}:** {text.strip()}\n"
+    path.write_text(raw, encoding="utf-8")
+    print(f"{args.id} marked corrected; every listing now says so")
+    _reindex_quiet()
+    return 0
+
+
 def cmd_status(args) -> int:
     """Set a note's lifecycle status, and reindex so search agrees.
 
@@ -1627,6 +1965,24 @@ def main() -> int:
     i.add_argument("--repo")
     i.add_argument("--all", action="store_true", help="include settled ones")
     i.set_defaults(fn=cmd_issues)
+
+    gr = sub.add_parser("graph",
+                        help="draw the filtered link graph (SVG, or --html to explore)")
+    gr.add_argument("query", nargs="*", help="same query as search")
+    gr.add_argument("--tag", action="append")
+    gr.add_argument("--kind")
+    gr.add_argument("--repo")
+    gr.add_argument("--status")
+    gr.add_argument("--all", action="store_true")
+    gr.add_argument("--html", action="store_true",
+                    help="one self-contained HTML file, no CDN and no build step")
+    gr.set_defaults(fn=cmd_graph, json=False, expand=None)
+
+    c = sub.add_parser("correct",
+                       help="record that a note's claim was disproven, visibly")
+    c.add_argument("id")
+    c.add_argument("-m", "--message")
+    c.set_defaults(fn=cmd_correct)
 
     d = sub.add_parser("discuss", help="append a comment to a note")
     d.add_argument("id")

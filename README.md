@@ -136,3 +136,23 @@ several knowledge bases.
 - [docs/advanced.md](docs/advanced.md) — where the engine and base live, `--root`, note kinds, writing notes worth keeping
 - [CHANGELOG.md](CHANGELOG.md) — what changed
 - MIT licensed. See [LICENSE](LICENSE).
+
+## Seeing the shape of it
+
+`search --expand` walks the link graph one hop at a time, which answers "what
+is next to this" and never answers "what shape is this area".
+
+```bash
+../grumpy/grumpy.py graph --tag esp32 > graph.svg     # commit this
+../grumpy/grumpy.py graph --repo anvil --html > g.html # click around
+```
+
+It takes the same filters as `search` on purpose. This is search rendered
+differently, not a second thing to learn, and there is deliberately no default
+of everything: two hundred notes drawn whole is a hairball that answers
+nothing.
+
+Shape is kind, fill is severity, faded is settled, size is how many links a
+note has, and a **red ring means the note has been corrected**. Layout is
+deterministic, so the same base draws the same picture and the SVG can be
+committed and reviewed in a diff like any other artifact.
