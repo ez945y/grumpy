@@ -1660,6 +1660,80 @@ def cmd_graph(args) -> int:
     return 0
 
 
+# The order a briefing goes in. Not alphabetical, not relevance: what would
+# change your mind first, then what you already settled, then background.
+BRIEF_ORDER = [
+    ("known-issue", "會咬人的  open issues"),
+    ("decision", "已經決定的  decisions, do not relitigate"),
+    ("task", "還沒做的  open work"),
+    ("architecture", "背景  how it is built"),
+    ("runbook", "怎麼做  procedures"),
+    ("reference", "查表  reference"),
+]
+SEV_RANK = {"blocker": 0, "major": 1, "minor": 2}
+
+
+def cmd_brief(args) -> int:
+    """The same search, ordered for someone about to make a decision.
+
+    `search` answers "what mentions this" and orders by relevance, which is the
+    right answer to that question and the wrong shape for the question people
+    actually arrive with, which is "I am about to touch forge, what do I need
+    to know". A flat list ranked by term frequency puts a runbook above a
+    blocker and makes you read all of it to find out which is which.
+
+    So: grouped by kind in briefing order, worst severity first inside a group,
+    corrections called out, and the link ids dropped. Those `-> dn-06s5acxd
+    dn-06se4pex ...` lists are noise in a listing - eight opaque ids carry
+    nothing without a cross-reference, and the reader pays for them in every
+    row. `search --expand` exists for when you want the neighbours.
+    """
+    rows = _search_rows(args)
+    if not rows:
+        print("no matches")
+        return 1
+    by_id = {e["id"]: e for e in all_notes() + all_docs()}
+
+    groups: dict[str, list] = {}
+    for nid, title, kind, status, ntags, nrepos, coll in rows:
+        groups.setdefault(kind, []).append((nid, title, status, ntags, nrepos))
+
+    total = len(rows)
+    shown_kinds = [k for k, _ in BRIEF_ORDER if k in groups]
+    rest = sorted(k for k in groups if k not in dict(BRIEF_ORDER))
+    print(f"{total} notes")
+
+    for kind in shown_kinds + rest:
+        items = groups[kind]
+        label = dict(BRIEF_ORDER).get(kind, kind)
+
+        def sort_key(it):
+            nid, title, status, ntags, nrepos = it
+            sev = next((t for t in ntags.split() if t in SEV_RANK), "")
+            return (SEV_RANK.get(sev, 8), title.lower())
+
+        ordered = sorted(items, key=sort_key)
+        # A briefing you cannot finish is a dump with headings. Blockers are
+        # never truncated; everything else gets the top few and an honest count
+        # of what is not shown, so the elision is visible rather than silent.
+        keep = ordered if args.full else [
+            it for i, it in enumerate(ordered)
+            if i < args.top or next((t for t in it[3].split() if t == "blocker"), None)]
+        hidden = len(ordered) - len(keep)
+        print(f"\n{label}  ({len(items)})")
+        for nid, title, status, ntags, nrepos in keep:
+            n = by_id.get(nid, {})
+            sev = next((t for t in ntags.split() if t in SEV_RANK), "")
+            bullet = {"blocker": "!!", "major": " !", "minor": "  "}.get(sev, "  ")
+            flag = "" if status == "open" else f" [{status}]"
+            mark = "   ** CORRECTED **" if n.get("corrected") else ""
+            print(f"  {bullet} {title}{flag}{mark}")
+            print(f"       {nid}" + (f"   {nrepos}" if nrepos else ""))
+        if hidden:
+            print(f"       ... {hidden} more, --full to see them")
+    return 0
+
+
 def cmd_serve(args) -> int:
     """Serve the browsable view from the live base, so it cannot go stale.
 
@@ -2155,7 +2229,7 @@ def main() -> int:
 
     gr = sub.add_parser("graph",
                         help="draw the filtered link graph (SVG, or --html to explore)")
-    gr.add_argument("query", nargs="*", help="same query as search")
+    gr.add_argument("query", nargs="?", default="", help="same query as search")
     gr.add_argument("--tag", action="append")
     gr.add_argument("--kind")
     gr.add_argument("--repo")
@@ -2166,6 +2240,21 @@ def main() -> int:
     gr.add_argument("--html", action="store_true",
                     help="one self-contained HTML file, no CDN and no build step")
     gr.set_defaults(fn=cmd_graph, json=False, expand=None)
+
+    br = sub.add_parser("brief",
+                        help="the same search, ordered for a decision")
+    br.add_argument("query", nargs="?", default="")
+    br.add_argument("--tag", action="append")
+    br.add_argument("--kind")
+    br.add_argument("--repo")
+    br.add_argument("--status")
+    br.add_argument("--all", action="store_true",
+                    help="include settled entries")
+    br.add_argument("--full", action="store_true",
+                    help="every match, not the top of each group")
+    br.add_argument("--top", type=int, default=6,
+                    help="how many per group before eliding (blockers never elide)")
+    br.set_defaults(fn=cmd_brief, json=False, expand=None)
 
     sv = sub.add_parser("serve",
                         help="browse the base in a browser, live (never stale)")
