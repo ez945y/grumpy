@@ -1469,17 +1469,18 @@ def _first_correction(body: str) -> str:
 _HTML_SHELL = """<!doctype html><meta charset="utf-8"><title>grumpy</title>
 <style>
  body{margin:0;font:13px/1.5 ui-sans-serif,system-ui,sans-serif;background:#fbfbfa;color:#2c3e50}
- header{padding:14px 20px;border-bottom:1px solid #e6e6e3}
- h1{margin:0;font-size:15px}
- .sub{color:#7f8c8d;font-size:12px;margin-top:4px}
- #bar{padding:8px 20px;border-bottom:1px solid #e6e6e3;display:flex;gap:14px;flex-wrap:wrap}
- #bar label{cursor:pointer;user-select:none;color:#34495e}
- #list{padding:14px 20px 60px}
- .row{padding:3px 0;border-left:2px solid transparent}
+ header{padding:12px 20px 10px;border-bottom:1px solid #e6e6e3;position:sticky;top:0;
+        background:#fbfbfaee;backdrop-filter:blur(6px);z-index:5}
+ #q{width:100%;box-sizing:border-box;padding:9px 11px;font:14px inherit;
+    border:1px solid #d8d8d4;border-radius:6px;background:#fff}
+ #q:focus{outline:none;border-color:#7f8c8d}
+ .sub{color:#7f8c8d;font-size:12px;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap}
+ .sub label{cursor:pointer;user-select:none}
+ #body{padding:6px 20px 80px}
+ .row{padding:3px 0}
  .row:hover{background:#f2f2ef}
- .t{font-weight:400}
  .root>.t{font-weight:650}
- .meta{color:#95a5a6;font-size:11px}
+ .meta{color:#95a5a6;font-size:11px;margin-left:15px}
  .id{color:#b0b6b8;font-size:11px;font-family:ui-monospace,monospace;margin-right:6px}
  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
       vertical-align:1px;border:1px solid #2c3e50}
@@ -1487,45 +1488,94 @@ _HTML_SHELL = """<!doctype html><meta charset="utf-8"><title>grumpy</title>
  .cflag{color:#c0392b;font-size:11px;margin-left:8px}
  .settled{opacity:.5}
  .sep{margin:18px 0 4px;color:#7f8c8d;font-size:11px;font-weight:600}
- .hide{display:none}
+ .panel{margin:14px 0 6px}
+ .panel h2{font-size:12px;margin:0 0 4px;color:#34495e;text-transform:uppercase;
+           letter-spacing:.05em}
+ .panel .n{color:#7f8c8d;font-weight:400;text-transform:none;letter-spacing:0}
+ .empty{color:#95a5a6;font-size:12px;padding:4px 0}
+ mark{background:#ffe58f;padding:0 1px}
 </style>
-<header><h1 id=h></h1><div class=sub id=sub></div></header>
-<div id=bar></div><div id=list></div>
+<header>
+ <input id=q placeholder="type to filter - id, title, kind, repo, tag. empty shows the overview." autofocus>
+ <div class=sub id=sub></div>
+</header>
+<div id=body></div>
 <script>
 const D=__DATA__;
 const SEV={blocker:'#c0392b',major:'#e67e22',minor:'#f1c40f'};
 const CLOSED=['resolved','fixed','done','wontfix','duplicate','obsolete'];
-document.getElementById('h').textContent='grumpy';
-document.getElementById('sub').textContent=
-  D.rows.filter(r=>r.node).length+' notes, '+D.edges+' links   indent = linked from above';
-const kinds=[...new Set(D.rows.filter(r=>r.node).map(r=>r.node.kind))].sort();
+const NODES=D.rows.filter(r=>r.node).map(r=>r.node);
 const off=new Set();
-function draw(){
- const L=document.getElementById('list');L.innerHTML='';
- D.rows.forEach(r=>{
-  if(r.sep){const d=document.createElement('div');d.className='sep';d.textContent=r.sep;
-    L.appendChild(d);return}
-  const n=r.node; if(off.has(n.kind))return;
-  const settled=CLOSED.includes(n.status);
-  const div=document.createElement('div');
-  div.className='row'+(r.root?' root':'')+(settled?' settled':'');
-  div.style.paddingLeft=(r.depth*22)+'px';
-  const dot=`<span class="dot${n.corrected?' corrected':''}" style="background:${
-    settled?'#bdc3c7':(SEV[n.sev]||'#7f8c8d')}"></span>`;
-  div.innerHTML=dot+`<span class=id>${n.id}</span><span class=t>${n.title}</span>`+
-    (n.corrected?`<span class=cflag>CORRECTED ${n.corrected}</span>`:'')+
-    `<div class=meta style="margin-left:15px">${n.kind}`+
-    (n.status!=='open'?' / '+n.status:'')+
-    (n.repos.length?'   '+n.repos.join(' '):'')+
-    (n.tags.length?'   '+n.tags.filter(t=>t!==n.kind).join(' '):'')+`</div>`;
-  L.appendChild(div)})
-}
-const bar=document.getElementById('bar');
+const kinds=[...new Set(NODES.map(n=>n.kind))].sort();
+const q=document.getElementById('q'), body=document.getElementById('body');
+
+const sub=document.getElementById('sub');
+sub.innerHTML=`<span>${NODES.length} notes, ${D.edges} links</span>`;
 kinds.forEach(k=>{const l=document.createElement('label');
  l.innerHTML='<input type=checkbox checked> '+k;
- l.querySelector('input').onchange=e=>{e.target.checked?off.delete(k):off.add(k);draw()};
- bar.appendChild(l)});
-draw();
+ l.querySelector('input').onchange=e=>{e.target.checked?off.delete(k):off.add(k);render()};
+ sub.appendChild(l)});
+
+function esc(t){return t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function hl(t,term){if(!term)return esc(t);
+ const i=t.toLowerCase().indexOf(term);if(i<0)return esc(t);
+ return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+term.length))+'</mark>'+esc(t.slice(i+term.length))}
+
+function rowHTML(n,depth,root,term){
+ const settled=CLOSED.includes(n.status);
+ const dot=`<span class="dot${n.corrected?' corrected':''}" style="background:${
+   settled?'#bdc3c7':(SEV[n.sev]||'#7f8c8d')}"></span>`;
+ return `<div class="row${root?' root':''}${settled?' settled':''}" style="padding-left:${depth*22}px">`+
+  dot+`<span class=id>${n.id}</span><span class=t>${hl(n.title,term)}</span>`+
+  (n.corrected?`<span class=cflag>CORRECTED ${n.corrected}</span>`:'')+
+  `<div class=meta>${n.kind}`+(n.status!=='open'?' / '+n.status:'')+
+  (n.repos.length?'   '+n.repos.join(' '):'')+
+  (n.tags.length?'   '+n.tags.filter(t=>t!==n.kind&&t!==n.sev).join(' '):'')+
+  `</div></div>`}
+
+function panel(title,count,items,emptyMsg){
+ if(!items.length&&!emptyMsg)return '';
+ return `<div class=panel><h2>${title} <span class=n>${count}</span></h2>`+
+  (items.length?items.join(''):`<div class=empty>${emptyMsg}</div>`)+`</div>`}
+
+function overview(){
+ const live=n=>!CLOSED.includes(n.status)&&!off.has(n.kind);
+ const tasks=NODES.filter(n=>n.kind==='task'&&live(n));
+ const sevRank={blocker:0,major:1,minor:2};
+ const issues=NODES.filter(n=>n.kind==='known-issue'&&live(n))
+   .sort((a,b)=>(sevRank[a.sev]??9)-(sevRank[b.sev]??9));
+ const corrected=NODES.filter(n=>n.corrected);
+ const orphanIds=new Set();
+ let inOrphan=false;
+ D.rows.forEach(r=>{if(r.sep){inOrphan=true;return} if(inOrphan&&r.node)orphanIds.add(r.node.id)});
+ const orphans=NODES.filter(n=>orphanIds.has(n.id));
+ return panel('待辦  open tasks',tasks.length,tasks.map(n=>rowHTML(n,0,false,'')),
+              'nothing open')
+  +panel('未解決  open issues, worst first',issues.length,
+         issues.map(n=>rowHTML(n,0,false,'')),'none open')
+  +panel('已被推翻  corrected',corrected.length,
+         corrected.map(n=>rowHTML(n,0,false,'')),'')
+  +panel('孤兒  linked to nothing',orphans.length,
+         orphans.map(n=>rowHTML(n,0,false,'')),'')
+  +`<div class=panel><h2>全部  the whole outline <span class=n>${
+     NODES.filter(n=>!off.has(n.kind)).length}</span></h2>`+outline('')+`</div>`}
+
+function outline(term){
+ let out='';
+ D.rows.forEach(r=>{
+  if(r.sep){out+=`<div class=sep>${r.sep}</div>`;return}
+  const n=r.node; if(off.has(n.kind))return;
+  if(term&&!n.hay.includes(term))return;
+  out+=rowHTML(n,term?0:r.depth,r.root,term)});
+ return out||`<div class=empty>no match</div>`}
+
+function render(){
+ const term=q.value.trim().toLowerCase();
+ body.innerHTML=term?outline(term):overview()}
+
+q.addEventListener('input',render);
+q.addEventListener('keydown',e=>{if(e.key==='Escape'){q.value='';render()}});
+render();
 </script>"""
 
 
@@ -1570,7 +1620,12 @@ def cmd_graph(args) -> int:
         rows, _ = _graph_tree(nodes, edges)
         payload = json.dumps({
             "rows": [{"sep": r["sep"]} if "sep" in r else
-                     {"node": r["node"], "depth": r["depth"], "root": r["root"]}
+                     {"node": dict(r["node"], hay=" ".join([
+                          r["node"]["id"], r["node"]["title"], r["node"]["kind"],
+                          r["node"]["status"], " ".join(r["node"]["repos"]),
+                          " ".join(r["node"]["tags"]),
+                      ]).lower()),
+                      "depth": r["depth"], "root": r["root"]}
                      for r in rows],
             "edges": len(edges),
         }, ensure_ascii=False)
