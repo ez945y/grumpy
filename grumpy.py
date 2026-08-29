@@ -1466,81 +1466,65 @@ def _first_correction(body: str) -> str:
     return ""
 
 
-_HTML_SHELL = """<!doctype html><meta charset="utf-8"><title>grumpy graph</title>
+_HTML_SHELL = """<!doctype html><meta charset="utf-8"><title>grumpy</title>
 <style>
- body{margin:0;font:13px ui-sans-serif,system-ui,sans-serif;background:#fbfbfa;color:#2c3e50}
- #bar{padding:8px 12px;border-bottom:1px solid #e3e3e0;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
- #bar label{cursor:pointer;user-select:none}
- #tip{position:fixed;pointer-events:none;background:#2c3e50;color:#fff;padding:6px 8px;
-      border-radius:4px;max-width:380px;display:none;font-size:12px;line-height:1.4;z-index:9}
- .n{cursor:pointer}.dim{opacity:.12}
- svg{display:block}
+ body{margin:0;font:13px/1.5 ui-sans-serif,system-ui,sans-serif;background:#fbfbfa;color:#2c3e50}
+ header{padding:14px 20px;border-bottom:1px solid #e6e6e3}
+ h1{margin:0;font-size:15px}
+ .sub{color:#7f8c8d;font-size:12px;margin-top:4px}
+ #bar{padding:8px 20px;border-bottom:1px solid #e6e6e3;display:flex;gap:14px;flex-wrap:wrap}
+ #bar label{cursor:pointer;user-select:none;color:#34495e}
+ #list{padding:14px 20px 60px}
+ .row{padding:3px 0;border-left:2px solid transparent}
+ .row:hover{background:#f2f2ef}
+ .t{font-weight:400}
+ .root>.t{font-weight:650}
+ .meta{color:#95a5a6;font-size:11px}
+ .id{color:#b0b6b8;font-size:11px;font-family:ui-monospace,monospace;margin-right:6px}
+ .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
+      vertical-align:1px;border:1px solid #2c3e50}
+ .corrected{outline:2px solid #c0392b;outline-offset:2px}
+ .cflag{color:#c0392b;font-size:11px;margin-left:8px}
+ .settled{opacity:.5}
+ .sep{margin:18px 0 4px;color:#7f8c8d;font-size:11px;font-weight:600}
+ .hide{display:none}
 </style>
-<div id=bar></div><svg id=g></svg><div id=tip></div>
+<header><h1 id=h></h1><div class=sub id=sub></div></header>
+<div id=bar></div><div id=list></div>
 <script>
-const D=__DATA__, W=__W__, H=__H__;
-const svg=document.getElementById('g'), tip=document.getElementById('tip');
-svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('width',W); svg.setAttribute('height',H);
+const D=__DATA__;
 const SEV={blocker:'#c0392b',major:'#e67e22',minor:'#f1c40f'};
 const CLOSED=['resolved','fixed','done','wontfix','duplicate','obsolete'];
-const pos={}; D.nodes.forEach(n=>pos[n.id]=[n.x,n.y]);
-const adj={}; D.edges.forEach(e=>{(adj[e.a]=adj[e.a]||[]).push(e.b);(adj[e.b]=adj[e.b]||[]).push(e.a)});
-const kinds=[...new Set(D.nodes.map(n=>n.kind))].sort();
+document.getElementById('h').textContent='grumpy';
+document.getElementById('sub').textContent=
+  D.rows.filter(r=>r.node).length+' notes, '+D.edges+' links   indent = linked from above';
+const kinds=[...new Set(D.rows.filter(r=>r.node).map(r=>r.node.kind))].sort();
 const off=new Set();
-function el(t,a){const e=document.createElementNS('http://www.w3.org/2000/svg',t);
-  for(const k in a)e.setAttribute(k,a[k]);return e}
 function draw(){
-  svg.innerHTML='';
-  svg.appendChild(el('rect',{width:W,height:H,fill:'#fbfbfa'}));
-  D.cols.forEach((c,i)=>{const t=el('text',{x:130+i*260,y:52,'font-size':13,
-    'font-weight':600,fill:'#34495e'});t.textContent=c;svg.appendChild(t)});
-  const on=n=>!off.has(n.kind);
-  D.edges.forEach(e=>{const A=D.nodes.find(n=>n.id==e.a),B=D.nodes.find(n=>n.id==e.b);
-    if(!A||!B||!on(A)||!on(B))return;
-    const[x1,y1]=pos[e.a],[x2,y2]=pos[e.b],mx=(x1+x2)/2+(x1!=x2?40:0);
-    svg.appendChild(el('path',{d:`M${x1},${y1} Q${mx},${(y1+y2)/2} ${x2},${y2}`,
-      fill:'none',stroke:'#95a5a6','stroke-width':0.9,'stroke-opacity':0.55,class:'e','data-a':e.a,'data-b':e.b}))});
-  D.nodes.filter(on).forEach(n=>{
-    const r=7+Math.min(n.deg,6), settled=CLOSED.includes(n.status);
-    const g=el('g',{class:'n','data-id':n.id});
-    let sh;
-    if(n.kind=='decision')sh=el('polygon',{points:`${n.x},${n.y-r} ${n.x+r},${n.y} ${n.x},${n.y+r} ${n.x-r},${n.y}`});
-    else if(n.kind=='known-issue')sh=el('polygon',{points:`${n.x},${n.y-r} ${n.x+r},${n.y+r} ${n.x-r},${n.y+r}`});
-    else if(n.kind=='task')sh=el('rect',{x:n.x-r,y:n.y-r,width:2*r,height:2*r,rx:2});
-    else sh=el('circle',{cx:n.x,cy:n.y,r:r});
-    sh.setAttribute('fill',settled?'#bdc3c7':(SEV[n.sev]||'#7f8c8d'));
-    sh.setAttribute('fill-opacity',settled?0.45:1);
-    sh.setAttribute('stroke','#2c3e50');sh.setAttribute('stroke-width',1);
-    g.appendChild(sh);
-    if(n.corrected)g.appendChild(el('circle',{cx:n.x,cy:n.y,r:r+4,fill:'none',
-      stroke:'#c0392b','stroke-width':2.5}));
-    const t=el('text',{x:n.x+r+6,y:n.y+4,'font-size':10,fill:'#2c3e50'});
-    t.textContent=n.title.slice(0,44);g.appendChild(t);
-    g.onmousemove=ev=>{tip.style.display='block';tip.style.left=(ev.clientX+14)+'px';
-      tip.style.top=(ev.clientY+14)+'px';
-      tip.innerHTML=`<b>${n.id}</b><br>${n.title}<br>${n.kind} / ${n.status}`+
-        (n.corrected?`<br><span style="color:#ff8a80">CORRECTED ${n.corrected}</span>`:'')+
-        (n.repos.length?`<br>repos: ${n.repos.join(' ')}`:'')};
-    g.onmouseleave=()=>tip.style.display='none';
-    g.onclick=()=>focus(n.id);
-    svg.appendChild(g)});
+ const L=document.getElementById('list');L.innerHTML='';
+ D.rows.forEach(r=>{
+  if(r.sep){const d=document.createElement('div');d.className='sep';d.textContent=r.sep;
+    L.appendChild(d);return}
+  const n=r.node; if(off.has(n.kind))return;
+  const settled=CLOSED.includes(n.status);
+  const div=document.createElement('div');
+  div.className='row'+(r.root?' root':'')+(settled?' settled':'');
+  div.style.paddingLeft=(r.depth*22)+'px';
+  const dot=`<span class="dot${n.corrected?' corrected':''}" style="background:${
+    settled?'#bdc3c7':(SEV[n.sev]||'#7f8c8d')}"></span>`;
+  div.innerHTML=dot+`<span class=id>${n.id}</span><span class=t>${n.title}</span>`+
+    (n.corrected?`<span class=cflag>CORRECTED ${n.corrected}</span>`:'')+
+    `<div class=meta style="margin-left:15px">${n.kind}`+
+    (n.status!=='open'?' / '+n.status:'')+
+    (n.repos.length?'   '+n.repos.join(' '):'')+
+    (n.tags.length?'   '+n.tags.filter(t=>t!==n.kind).join(' '):'')+`</div>`;
+  L.appendChild(div)})
 }
-function focus(id){
-  const keep=new Set([id,...(adj[id]||[])]);
-  document.querySelectorAll('.n').forEach(g=>
-    g.classList.toggle('dim',!keep.has(g.dataset.id)));
-  document.querySelectorAll('.e').forEach(p=>
-    p.classList.toggle('dim',!(keep.has(p.dataset.a)&&keep.has(p.dataset.b))));
-}
-svg.addEventListener('dblclick',()=>document.querySelectorAll('.dim')
-  .forEach(e=>e.classList.remove('dim')));
 const bar=document.getElementById('bar');
-bar.innerHTML=`<b>${D.nodes.length} notes, ${D.edges.length} links</b>
- <span style="color:#7f8c8d">click a node to isolate it, double-click the background to reset</span>`;
 kinds.forEach(k=>{const l=document.createElement('label');
-  l.innerHTML=`<input type=checkbox checked> ${k}`;
-  l.querySelector('input').onchange=e=>{e.target.checked?off.delete(k):off.add(k);draw()};
-  bar.appendChild(l)});
+ l.innerHTML='<input type=checkbox checked> '+k;
+ l.querySelector('input').onchange=e=>{e.target.checked?off.delete(k):off.add(k);draw()};
+ bar.appendChild(l)});
 draw();
 </script>"""
 
@@ -1583,10 +1567,14 @@ def cmd_graph(args) -> int:
         return 0
 
     if args.html:
-        payload = json.dumps({"nodes": nodes, "edges": edges, "cols": cols},
-                             ensure_ascii=False)
-        print(_HTML_SHELL.replace("__DATA__", payload)
-              .replace("__W__", str(w)).replace("__H__", str(h)))
+        rows, _ = _graph_tree(nodes, edges)
+        payload = json.dumps({
+            "rows": [{"sep": r["sep"]} if "sep" in r else
+                     {"node": r["node"], "depth": r["depth"], "root": r["root"]}
+                     for r in rows],
+            "edges": len(edges),
+        }, ensure_ascii=False)
+        print(_HTML_SHELL.replace("__DATA__", payload))
         return 0
 
     rows, h = _graph_tree(nodes, edges)
