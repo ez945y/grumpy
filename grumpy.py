@@ -159,7 +159,7 @@ def mint_id(pre: str, today: _dt.date | None = None) -> str:
     is a coin flip somewhere around 180 notes in a day. 32**5 is 33.5M, which
     puts a realistic team's daily output back into the noise.
     """
-    day = ((today or __dt.date.today()) - ID_EPOCH).days
+    day = ((today or _dt.date.today()) - ID_EPOCH).days
     rand = "".join(secrets.choice(ID_ALPHABET) for _ in range(5))
     return f"{pre}-{_b32(max(day, 0), 3)}{rand}"
 
@@ -743,7 +743,7 @@ def cmd_add(args) -> int:
             f"status: {args.status}\nsummary: {args.summary}\n"
             f"tags: [{', '.join(given)}]\n"
             f"repos: [{', '.join(r.strip() for r in (args.repos or '').split(',') if r.strip())}]\n"
-            f"links: [{', '.join(link_ids)}]\ncreated: {__dt.date.today()}\n---\n\n{body}\n",
+            f"links: [{', '.join(link_ids)}]\ncreated: {_dt.date.today()}\n---\n\n{body}\n",
             encoding="utf-8")
         if args.json:
             print(json.dumps({"id": nid, "path": str(path.relative_to(ROOT)),
@@ -792,7 +792,7 @@ def cmd_add(args) -> int:
         f"tags: [{', '.join(given)}]\n"
         f"repos: [{repos}]\n"
         f"links: [{', '.join(link_ids)}]\n"
-        f"created: {__dt.date.today()}\n"
+        f"created: {_dt.date.today()}\n"
         f"---\n\n{body}\n\n## Discussion\n",
         encoding="utf-8",
     )
@@ -1501,20 +1501,13 @@ _HTML_SHELL = """<!doctype html><meta charset="utf-8"><title>grumpy</title>
 </header>
 <div id=body></div>
 <script>
-const D=__DATA__;
+let D=__DATA__;
 const SEV={blocker:'#c0392b',major:'#e67e22',minor:'#f1c40f'};
 const CLOSED=['resolved','fixed','done','wontfix','duplicate','obsolete'];
-const NODES=D.rows.filter(r=>r.node).map(r=>r.node);
+const NODES=D?D.rows.filter(r=>r.node).map(r=>r.node):[];
 const off=new Set();
-const kinds=[...new Set(NODES.map(n=>n.kind))].sort();
 const q=document.getElementById('q'), body=document.getElementById('body');
-
 const sub=document.getElementById('sub');
-sub.innerHTML=`<span>${NODES.length} notes, ${D.edges} links</span>`;
-kinds.forEach(k=>{const l=document.createElement('label');
- l.innerHTML='<input type=checkbox checked> '+k;
- l.querySelector('input').onchange=e=>{e.target.checked?off.delete(k):off.add(k);render()};
- sub.appendChild(l)});
 
 function esc(t){return t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 function hl(t,term){if(!term)return esc(t);
@@ -1570,12 +1563,31 @@ function outline(term){
  return out||`<div class=empty>no match</div>`}
 
 function render(){
+ if(!D){body.innerHTML='<div class=empty>loading...</div>';return}
  const term=q.value.trim().toLowerCase();
  body.innerHTML=term?outline(term):overview()}
 
 q.addEventListener('input',render);
 q.addEventListener('keydown',e=>{if(e.key==='Escape'){q.value='';render()}});
-render();
+
+// Served live, D arrives as null and comes from the endpoint instead. The same
+// page is both the static export and the served one; there is no second UI to
+// keep in step with this one.
+if(D===null){
+ fetch('data.json',{cache:'no-store'}).then(r=>r.json()).then(j=>{D=j;boot()})
+} else boot();
+
+function boot(){
+ const NODES2=D.rows.filter(r=>r.node).map(r=>r.node);
+ NODES.length=0; NODES2.forEach(n=>NODES.push(n));
+ sub.innerHTML=`<span>${NODES.length} notes, ${D.edges} links</span>`;
+ [...new Set(NODES.map(n=>n.kind))].sort().forEach(k=>{
+   if([...sub.querySelectorAll('label')].some(l=>l.textContent.trim()===k))return;
+   const l=document.createElement('label');
+   l.innerHTML='<input type=checkbox checked> '+k;
+   l.querySelector('input').onchange=e=>{e.target.checked?off.delete(k):off.add(k);render()};
+   sub.appendChild(l)});
+ render()}
 </script>"""
 
 
@@ -1645,6 +1657,84 @@ def cmd_graph(args) -> int:
     for r in rows:
         out.append(_svg_row(r))
     print("\n".join(out))
+    return 0
+
+
+def cmd_serve(args) -> int:
+    """Serve the browsable view from the live base, so it cannot go stale.
+
+    The static export could not have this property and no amount of care would
+    have given it: a file is a snapshot, and a snapshot of a base that changes
+    is wrong the moment it changes. `refresh.sh` was a way of remembering to
+    re-take it, which is the same class of thing as remembering to reindex by
+    hand - it works until the once nobody remembers, and then the artifact
+    quietly disagrees with the notes.
+
+    The cost is that this is a command rather than a double-click. That is the
+    whole trade and it is worth naming: you cannot have both a file you open
+    from a file manager and a view that is never out of date.
+
+    stdlib only, bound to loopback, no write path. It reads the base on every
+    request, so editing a note and hitting reload shows the edit.
+    """
+    import http.server
+    import socketserver
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _send(self, body: bytes, ctype: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            # No caching: the point of this is that a reload is current.
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):  # noqa: N802
+            if self.path.startswith("/data.json"):
+                # Re-read from disk on every request. The base is a few hundred
+                # small files; correctness is worth more than the milliseconds.
+                entries = all_notes() + all_docs()
+                rows = [(e["id"], e.get("title", ""), e.get("kind", "note"),
+                         e.get("status", "open"), " ".join(e.get("tags", [])),
+                         " ".join(e.get("repos", [])),
+                         "doc" if e.get("summary") is not None else "note")
+                        for e in entries]
+                nodes, edges = _graph_model(entries, rows)
+                trows, _ = _graph_tree(nodes, edges)
+                payload = {
+                    "rows": [{"sep": r["sep"]} if "sep" in r else
+                             {"node": dict(r["node"], hay=" ".join([
+                                 r["node"]["id"], r["node"]["title"],
+                                 r["node"]["kind"], r["node"]["status"],
+                                 " ".join(r["node"]["repos"]),
+                                 " ".join(r["node"]["tags"])]).lower()),
+                              "depth": r["depth"], "root": r["root"]}
+                             for r in trows],
+                    "edges": len(edges),
+                }
+                self._send(json.dumps(payload, ensure_ascii=False).encode(),
+                           "application/json; charset=utf-8")
+                return
+            self._send(_HTML_SHELL.replace("__DATA__", "null").encode(),
+                       "text/html; charset=utf-8")
+
+        def log_message(self, *a):  # quiet
+            pass
+
+    with socketserver.TCPServer(("127.0.0.1", args.port), Handler) as httpd:
+        url = f"http://127.0.0.1:{args.port}/"
+        print(f"{url}   (live: reads the base on every request; ctrl-c to stop)")
+        if not args.no_open:
+            try:
+                import webbrowser
+                webbrowser.open(url)
+            except Exception:
+                pass
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print()
     return 0
 
 
@@ -2076,6 +2166,12 @@ def main() -> int:
     gr.add_argument("--html", action="store_true",
                     help="one self-contained HTML file, no CDN and no build step")
     gr.set_defaults(fn=cmd_graph, json=False, expand=None)
+
+    sv = sub.add_parser("serve",
+                        help="browse the base in a browser, live (never stale)")
+    sv.add_argument("--port", type=int, default=7391)
+    sv.add_argument("--no-open", action="store_true")
+    sv.set_defaults(fn=cmd_serve)
 
     c = sub.add_parser("correct",
                        help="record that a note's claim was disproven, visibly")

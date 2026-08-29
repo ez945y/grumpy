@@ -143,10 +143,16 @@ several knowledge bases.
 is next to this" and never answers "what shape is this area".
 
 ```bash
+../grumpy/grumpy.py serve                              # browse it, live
 ../grumpy/grumpy.py graph --tag esp32                  # an outline, in the terminal
-../grumpy/grumpy.py graph --tag esp32 --svg > graph.svg # commit this
-../grumpy/grumpy.py graph --repo anvil --html > g.html  # hand it to someone
+../grumpy/grumpy.py graph --repo anvil --html > g.html # a snapshot to hand someone
 ```
+
+`serve` reads the base on every request, so it is never out of date: add a note
+and reload. The static `--html` export cannot have that property and no care
+would give it - a file is a snapshot, and a snapshot of something that changes
+is wrong the moment it changes. Keep the export for handing to someone who has
+nothing installed; use `serve` for yourself.
 
 The default is text, and that is the lesson of the first version rather than a
 convenience. It was drawn first as a node-link diagram, and that carried less
