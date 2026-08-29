@@ -143,7 +143,7 @@ several knowledge bases.
 is next to this" and never answers "what shape is this area".
 
 ```bash
-../grumpy/grumpy.py brief forge                        # ordered for a decision
+../grumpy/grumpy.py search forge --brief               # ordered for a decision
 ../grumpy/grumpy.py serve                              # browse it, live
 ../grumpy/grumpy.py graph --tag esp32                  # an outline, in the terminal
 ../grumpy/grumpy.py graph --repo anvil --html > g.html # a snapshot to hand someone
@@ -174,7 +174,7 @@ actionable: it is either misfiled or the signal that a map is missing.
 Corrections are marked inline. Layout is deterministic, so the SVG can be
 committed and reviewed in a diff like any other artifact.
 
-## `search` and `brief` answer different questions
+## `--brief` answers a different question from the same rows
 
 `search` answers "what mentions this" and ranks by relevance. That is right for
 finding a thing and wrong for the question people usually arrive with, which is
@@ -182,8 +182,13 @@ finding a thing and wrong for the question people usually arrive with, which is
 frequency puts a runbook above a blocker and you have to read all of it to find
 out which is which.
 
-`brief` groups the same matches: open issues worst-first, then decisions already
+`--brief` groups the same matches: open issues worst-first, then decisions already
 made, then open work, then background. Blockers are never elided; everything
 else shows the top few with an honest count of what is not shown. It drops the
-`-> dn-xxx` neighbour lists, which carry nothing in a listing - `search
---expand` is there when you want them.
+`-> dn-xxx` neighbour lists, which carry nothing in a listing - `--expand` is
+there when you want them.
+
+It is a flag and not a command because it takes the same query and the same
+filters and differs only in how the rows are printed. Relevance order stays the
+default: search's other job is finding one note you half remember, which is
+exactly what ranking is for and what grouping gets in the way of.

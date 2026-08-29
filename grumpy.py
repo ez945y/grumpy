@@ -566,6 +566,9 @@ def cmd_search(args) -> int:
         print("no matches")
         return 1
 
+    if getattr(args, "brief", False):
+        return _render_brief(args, out)
+
     notes = all_notes()
     entries = notes + all_docs()
     by_id = {n["id"]: n for n in entries}
@@ -1673,8 +1676,8 @@ BRIEF_ORDER = [
 SEV_RANK = {"blocker": 0, "major": 1, "minor": 2}
 
 
-def cmd_brief(args) -> int:
-    """The same search, ordered for someone about to make a decision.
+def _render_brief(args, rows) -> int:
+    """The same matches, ordered for someone about to make a decision.
 
     `search` answers "what mentions this" and orders by relevance, which is the
     right answer to that question and the wrong shape for the question people
@@ -1688,10 +1691,6 @@ def cmd_brief(args) -> int:
     nothing without a cross-reference, and the reader pays for them in every
     row. `search --expand` exists for when you want the neighbours.
     """
-    rows = _search_rows(args)
-    if not rows:
-        print("no matches")
-        return 1
     by_id = {e["id"]: e for e in all_notes() + all_docs()}
 
     groups: dict[str, list] = {}
@@ -2145,6 +2144,14 @@ def main() -> int:
 
     s = sub.add_parser("search", help="full-text search, filtered by tag/kind/repo")
     s.add_argument("query", nargs="?", default="")
+    s.add_argument("--brief", action="store_true",
+                   help="group for a decision: issues worst-first, then "
+                        "decisions, then open work, then background")
+    s.add_argument("--full", action="store_true",
+                   help="with --brief, every match rather than the top of each group")
+    s.add_argument("--top", type=int, default=6,
+                   help="with --brief, how many per group before eliding "
+                        "(blockers never elide)")
     s.add_argument("--tag", action="append", help="tag slug; also matches its children")
     s.add_argument("--kind")
     s.add_argument("--repo")
@@ -2240,21 +2247,6 @@ def main() -> int:
     gr.add_argument("--html", action="store_true",
                     help="one self-contained HTML file, no CDN and no build step")
     gr.set_defaults(fn=cmd_graph, json=False, expand=None)
-
-    br = sub.add_parser("brief",
-                        help="the same search, ordered for a decision")
-    br.add_argument("query", nargs="?", default="")
-    br.add_argument("--tag", action="append")
-    br.add_argument("--kind")
-    br.add_argument("--repo")
-    br.add_argument("--status")
-    br.add_argument("--all", action="store_true",
-                    help="include settled entries")
-    br.add_argument("--full", action="store_true",
-                    help="every match, not the top of each group")
-    br.add_argument("--top", type=int, default=6,
-                    help="how many per group before eliding (blockers never elide)")
-    br.set_defaults(fn=cmd_brief, json=False, expand=None)
 
     sv = sub.add_parser("serve",
                         help="browse the base in a browser, live (never stale)")
