@@ -1497,6 +1497,9 @@ _HTML_SHELL = """<!doctype html><meta charset="utf-8"><title>grumpy</title>
  .panel .n{color:#7f8c8d;font-weight:400;text-transform:none;letter-spacing:0}
  .empty{color:#95a5a6;font-size:12px;padding:4px 0}
  mark{background:#ffe58f;padding:0 1px}
+ .more{color:#2980b9;cursor:pointer;font-size:11px;padding:2px 0 2px 15px}
+ .more:hover{text-decoration:underline}
+ .hits{color:#7f8c8d;font-size:12px;margin:10px 0 0}
 </style>
 <header>
  <input id=q placeholder="type to filter - id, title, kind, repo, tag. empty shows the overview." autofocus>
@@ -1522,53 +1525,56 @@ function rowHTML(n,depth,root,term){
  const dot=`<span class="dot${n.corrected?' corrected':''}" style="background:${
    settled?'#bdc3c7':(SEV[n.sev]||'#7f8c8d')}"></span>`;
  return `<div class="row${root?' root':''}${settled?' settled':''}" style="padding-left:${depth*22}px">`+
-  dot+`<span class=id>${n.id}</span><span class=t>${hl(n.title,term)}</span>`+
+  dot+`<span class=id>${n.id} </span><span class=t>${hl(n.title,term)}</span>`+
   (n.corrected?`<span class=cflag>CORRECTED ${n.corrected}</span>`:'')+
   `<div class=meta>${n.kind}`+(n.status!=='open'?' / '+n.status:'')+
   (n.repos.length?'   '+n.repos.join(' '):'')+
   (n.tags.length?'   '+n.tags.filter(t=>t!==n.kind&&t!==n.sev).join(' '):'')+
   `</div></div>`}
 
-function panel(title,count,items,emptyMsg){
+const ORDER=[['known-issue','會咬人的  open issues'],['decision','已經決定的  decisions'],
+ ['task','還沒做的  open work'],['architecture','背景  how it is built'],
+ ['runbook','怎麼做  procedures'],['reference','查表  reference']];
+const SEVRANK={blocker:0,major:1,minor:2};
+const expanded=new Set();
+
+function panel(key,title,items,term,emptyMsg){
  if(!items.length&&!emptyMsg)return '';
- return `<div class=panel><h2>${title} <span class=n>${count}</span></h2>`+
-  (items.length?items.join(''):`<div class=empty>${emptyMsg}</div>`)+`</div>`}
+ const cap=expanded.has(key)?1e9:6;
+ // Blockers never elide. An elision that can hide the worst thing in the set
+ // is not a summary, it is a way of being wrong quietly.
+ const keep=items.filter((n,i)=>i<cap||n.sev==='blocker');
+ const hid=items.length-keep.length;
+ return `<div class=panel><h2>${title} <span class=n>${items.length}</span></h2>`+
+  (keep.length?keep.map(n=>rowHTML(n,0,false,term)).join(''):`<div class=empty>${emptyMsg}</div>`)+
+  (hid?`<div class=more data-k="${key}">... ${hid} more</div>`:'')+`</div>`}
 
-function overview(){
- const live=n=>!CLOSED.includes(n.status)&&!off.has(n.kind);
- const tasks=NODES.filter(n=>n.kind==='task'&&live(n));
- const sevRank={blocker:0,major:1,minor:2};
- const issues=NODES.filter(n=>n.kind==='known-issue'&&live(n))
-   .sort((a,b)=>(sevRank[a.sev]??9)-(sevRank[b.sev]??9));
- const corrected=NODES.filter(n=>n.corrected);
- const orphanIds=new Set();
- let inOrphan=false;
- D.rows.forEach(r=>{if(r.sep){inOrphan=true;return} if(inOrphan&&r.node)orphanIds.add(r.node.id)});
- const orphans=NODES.filter(n=>orphanIds.has(n.id));
- return panel('待辦  open tasks',tasks.length,tasks.map(n=>rowHTML(n,0,false,'')),
-              'nothing open')
-  +panel('未解決  open issues, worst first',issues.length,
-         issues.map(n=>rowHTML(n,0,false,'')),'none open')
-  +panel('已被推翻  corrected',corrected.length,
-         corrected.map(n=>rowHTML(n,0,false,'')),'')
-  +panel('孤兒  linked to nothing',orphans.length,
-         orphans.map(n=>rowHTML(n,0,false,'')),'')
-  +`<div class=panel><h2>全部  the whole outline <span class=n>${
-     NODES.filter(n=>!off.has(n.kind)).length}</span></h2>`+outline('')+`</div>`}
-
-function outline(term){
+function grouped(nodes,term){
+ // The same shape the terminal's --brief prints. Typing is the common path and
+ // it was the one rendering a flat list, which is how a wall of seventy rows
+ // ended up being the thing this tool showed you first.
+ const live=n=>!CLOSED.includes(n.status);
+ const bySev=(a,b)=>(SEVRANK[a.sev]??8)-(SEVRANK[b.sev]??8)||a.title.localeCompare(b.title);
  let out='';
- D.rows.forEach(r=>{
-  if(r.sep){out+=`<div class=sep>${r.sep}</div>`;return}
-  const n=r.node; if(off.has(n.kind))return;
-  if(term&&!n.hay.includes(term))return;
-  out+=rowHTML(n,term?0:r.depth,r.root,term)});
+ ORDER.forEach(([k,label])=>{
+  let g=nodes.filter(n=>n.kind===k&&!off.has(k));
+  if(k==='known-issue'||k==='task')g=g.filter(live).concat(g.filter(n=>!live(n)));
+  out+=panel(k,label,g.sort(bySev),term,'')});
+ const rest=nodes.filter(n=>!ORDER.some(([k])=>k===n.kind)&&!off.has(n.kind));
+ if(rest.length)out+=panel('other','其他  other',rest.sort(bySev),term,'');
+ const corrected=nodes.filter(n=>n.corrected);
+ if(corrected.length)out=panel('corrected','已被推翻  corrected',corrected,term,'')+out;
  return out||`<div class=empty>no match</div>`}
 
 function render(){
  if(!D){body.innerHTML='<div class=empty>loading...</div>';return}
  const term=q.value.trim().toLowerCase();
- body.innerHTML=term?outline(term):overview()}
+ const hits=term?NODES.filter(n=>n.hay.includes(term)):null;
+ body.innerHTML=term?
+   `<div class=hits>${hits.length} / ${NODES.length} 則命中</div>`+grouped(hits,term)
+   :overview();
+ body.querySelectorAll('.more').forEach(e=>e.onclick=()=>{
+   expanded.add(e.dataset.k);render()})}
 
 q.addEventListener('input',render);
 q.addEventListener('keydown',e=>{if(e.key==='Escape'){q.value='';render()}});
