@@ -143,16 +143,26 @@ several knowledge bases.
 is next to this" and never answers "what shape is this area".
 
 ```bash
-../grumpy/grumpy.py graph --tag esp32 > graph.svg     # commit this
-../grumpy/grumpy.py graph --repo anvil --html > g.html # click around
+../grumpy/grumpy.py graph --tag esp32                  # an outline, in the terminal
+../grumpy/grumpy.py graph --tag esp32 --svg > graph.svg # commit this
+../grumpy/grumpy.py graph --repo anvil --html > g.html  # hand it to someone
 ```
+
+The default is text, and that is the lesson of the first version rather than a
+convenience. It was drawn first as a node-link diagram, and that carried less
+than the listing it was drawn from: truncated titles, positions meaning only
+grid order, three encodings each needing a legend. The base is not a web. It is
+a few map notes each carrying a string of threads, plus orphans - a forest, and
+a forest drawn as a forest reads without a legend. Once it read properly it was
+obviously an outline, and an outline belongs in the terminal.
 
 It takes the same filters as `search` on purpose. This is search rendered
 differently, not a second thing to learn, and there is deliberately no default
 of everything: two hundred notes drawn whole is a hairball that answers
 nothing.
 
-Shape is kind, fill is severity, faded is settled, size is how many links a
-note has, and a **red ring means the note has been corrected**. Layout is
-deterministic, so the same base draws the same picture and the SVG can be
+Indent is what is linked from what, so the root of each tree is its map note.
+Orphans get their own group at the end, because a note connected to nothing is
+actionable: it is either misfiled or the signal that a map is missing.
+Corrections are marked inline. Layout is deterministic, so the SVG can be
 committed and reviewed in a diff like any other artifact.

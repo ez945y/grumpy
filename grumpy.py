@@ -1349,61 +1349,101 @@ def _graph_model(entries, rows):
     return nodes, [{"a": a, "b": b} for a, b in edges]
 
 
-def _graph_layout(nodes):
-    """Columns by repo, rows by kind then id. Same input, same picture."""
-    col_of, cols = {}, []
-    for n in nodes:
-        key = n["repos"][0] if n["repos"] else "(no repo)"
-        if key not in col_of:
-            col_of[key] = len(cols)
-            cols.append(key)
-        n["_col"] = col_of[key]
-    per = {}
-    for n in sorted(nodes, key=lambda n: (n["_col"], n["kind"], n["id"])):
-        i = per.setdefault(n["_col"], 0)
-        per[n["_col"]] = i + 1
-        n["x"] = 130 + n["_col"] * 260
-        n["y"] = 110 + i * 46
-    height = 160 + max([0] + list(per.values())) * 46
-    return cols, len(cols) * 260 + 120, height
+def _graph_tree(nodes, edges):
+    """Group into components and lay each out as a tree, because that is the shape.
+
+    The first version of this drew a node-link diagram on a grid. It carried
+    less than the text listing it was drawn from: titles truncated to fit,
+    positions meaning nothing but grid order, and three encodings that each
+    needed a legend lookup. A picture that has to be decoded to say less than
+    `search` already says is not worth drawing.
+
+    The base is not a web. It is a handful of map notes each carrying a string
+    of threads, plus some orphans. That is a forest, and a forest drawn as a
+    forest reads without a legend: depth is what depends on what, and the root
+    of each tree is the map. Orphans get their own group at the end because a
+    note connected to nothing is actionable - it is either misfiled or the
+    signal that a map is missing.
+    """
+    ids = {n["id"] for n in nodes}
+    adj = {i: set() for i in ids}
+    for e in edges:
+        adj[e["a"]].add(e["b"])
+        adj[e["b"]].add(e["a"])
+    by_id = {n["id"]: n for n in nodes}
+
+    seen, comps = set(), []
+    for start in sorted(ids):
+        if start in seen:
+            continue
+        stack, comp = [start], []
+        seen.add(start)
+        while stack:
+            cur = stack.pop()
+            comp.append(cur)
+            for nb in sorted(adj[cur]):
+                if nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+        comps.append(comp)
+
+    # Biggest first: the map you most need to see should not be below the fold.
+    comps.sort(key=lambda c: (-len(c), c[0]))
+    orphans = [c[0] for c in comps if len(c) == 1]
+    comps = [c for c in comps if len(c) > 1]
+
+    y, rows = 92, []
+    for comp in comps:
+        root = max(comp, key=lambda i: (len(adj[i]), -len(i)))
+        depth, order, q = {root: 0}, [], [root]
+        while q:
+            cur = q.pop(0)
+            order.append(cur)
+            for nb in sorted(adj[cur], key=lambda i: by_id[i]["title"]):
+                if nb not in depth:
+                    depth[nb] = depth[cur] + 1
+                    q.append(nb)
+        for nid in order:
+            rows.append({"node": by_id[nid], "depth": depth[nid], "y": y,
+                         "root": nid == root})
+            y += 26
+        y += 18
+    if orphans:
+        rows.append({"sep": "orphans - linked to nothing", "y": y}); y += 26
+        for nid in sorted(orphans, key=lambda i: by_id[i]["title"]):
+            rows.append({"node": by_id[nid], "depth": 0, "y": y, "root": False})
+            y += 26
+    return rows, y + 40
 
 
-
-def _svg_node(n) -> str:
-    """One node. Shape says kind, fill says severity, ring says corrected."""
-    x, y = n["x"], n["y"]
-    r = 7 + min(n["deg"], 6)
-    fill = SEV_FILL.get(n["sev"], "#7f8c8d")
-    if n["status"] in CLOSED_STATUS:
-        fill, op = "#bdc3c7", 0.45
-    else:
-        op = 1.0
-    sh = KIND_SHAPE.get(n["kind"], "circle")
-    if sh == "diamond":
-        g = f'<polygon points="{x},{y-r} {x+r},{y} {x},{y+r} {x-r},{y}"'
-    elif sh == "triangle":
-        g = f'<polygon points="{x},{y-r} {x+r},{y+r} {x-r},{y+r}"'
-    elif sh == "square":
-        g = f'<rect x="{x-r}" y="{y-r}" width="{2*r}" height="{2*r}" rx="2"'
-    elif sh == "hex":
-        pts = " ".join(f"{x+r*math.cos(math.radians(a)):.1f},{y+r*math.sin(math.radians(a)):.1f}"
-                       for a in range(0, 360, 60))
-        g = f'<polygon points="{pts}"'
-    elif sh == "doc":
-        g = f'<rect x="{x-r}" y="{y-r*0.8:.1f}" width="{2*r}" height="{1.6*r:.1f}"'
-    else:
-        g = f'<circle cx="{x}" cy="{y}" r="{r}"'
-    out = [f'{g} fill="{fill}" fill-opacity="{op}" stroke="#2c3e50" stroke-width="1"/>']
+def _svg_row(r) -> str:
+    """One line of the outline. Full title, no legend needed to read it."""
+    if "sep" in r:
+        return (f'<text x="24" y="{r["y"]}" font-size="11" font-weight="600" '
+                f'fill="#7f8c8d">{_esc(r["sep"])}</text>')
+    n, x, y = r["node"], 30 + r["depth"] * 26, r["y"]
+    settled = n["status"] in CLOSED_STATUS
+    fill = "#bdc3c7" if settled else SEV_FILL.get(n["sev"], "#7f8c8d")
+    out = []
+    if r["depth"]:
+        # An elbow, not a curve: it reads as containment rather than as a
+        # relation of unknown direction.
+        out.append(f'<path d="M{x-16},{y-13} L{x-16},{y-4} L{x-7},{y-4}" fill="none" '
+                   f'stroke="#cfd4d6" stroke-width="1"/>')
+    out.append(f'<circle cx="{x}" cy="{y-4}" r="4" fill="{fill}" '
+               f'fill-opacity="{0.45 if settled else 1}" stroke="#2c3e50" stroke-width="0.8"/>')
     if n["corrected"]:
-        # The one thing that must survive being skimmed.
-        out.append(f'<circle cx="{x}" cy="{y}" r="{r+4}" fill="none" '
-                   f'stroke="#c0392b" stroke-width="2.5"/>')
-    label = _esc(n["title"])[:44]
-    out.append(f'<text x="{x+r+6}" y="{y+4}" font-size="10" fill="#2c3e50">'
-               f'{label}</text>')
-    out.append(f'<title>{_esc(n["id"])}  {_esc(n["title"])}\n'
-               f'{n["kind"]} / {n["status"]}'
-               + (f'\nCORRECTED {n["corrected"]}' if n["corrected"] else '') + '</title>')
+        out.append(f'<circle cx="{x}" cy="{y-4}" r="7.5" fill="none" '
+                   f'stroke="#c0392b" stroke-width="2"/>')
+    weight = "600" if r["root"] else "400"
+    out.append(f'<text x="{x+13}" y="{y}" font-size="12" font-weight="{weight}" '
+               f'fill="#2c3e50">{_esc(n["title"])}</text>')
+    meta = f'{n["kind"]}' + (f' / {n["status"]}' if n["status"] != "open" else "")
+    if n["corrected"]:
+        meta += f'  CORRECTED {n["corrected"]}'
+    if n["repos"]:
+        meta += "  " + " ".join(n["repos"])
+    out.append(f'<text x="{x+13}" y="{y+11}" font-size="9" fill="#95a5a6">{_esc(meta)}</text>')
     return "".join(out)
 
 
@@ -1518,8 +1558,29 @@ def cmd_graph(args) -> int:
         return 1
     entries = all_notes() + all_docs()
     nodes, edges = _graph_model(entries, rows)
-    cols, w, h = _graph_layout(nodes)
-    pos = {n["id"]: (n["x"], n["y"]) for n in nodes}
+
+    if not args.svg and not args.html:
+        # Text is the default because this turned out to be an outline, not a
+        # diagram, and an outline belongs where people already are. Rendering
+        # it first as SVG was the mistake: the picture was the deliverable in
+        # my head and the terminal is where it actually gets read. The image
+        # formats stay for the two things text cannot do - hand it to someone,
+        # and commit it so the diff shows how the shape changed.
+        rows, _ = _graph_tree(nodes, edges)
+        print(f"{len(nodes)} notes, {len(edges)} links"
+              "   (indent = linked from above)")
+        for r in rows:
+            if "sep" in r:
+                print(f"\n  {r['sep']}")
+                continue
+            n = r["node"]
+            pad = "  " + "  " * r["depth"]
+            mark = "  ** CORRECTED **" if n["corrected"] else ""
+            flag = "" if n["status"] == "open" else f" [{n['status']}]"
+            print(f"{pad}{n['id']}  {n['title']}{flag}{mark}")
+            meta = n["kind"] + ("  " + " ".join(n["repos"]) if n["repos"] else "")
+            print(f"{pad}    {meta}")
+        return 0
 
     if args.html:
         payload = json.dumps({"nodes": nodes, "edges": edges, "cols": cols},
@@ -1528,25 +1589,18 @@ def cmd_graph(args) -> int:
               .replace("__W__", str(w)).replace("__H__", str(h)))
         return 0
 
+    rows, h = _graph_tree(nodes, edges)
+    w = 1180
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
            f'width="{w}" height="{h}" font-family="ui-sans-serif,system-ui,sans-serif">',
-           f'<rect width="{w}" height="{h}" fill="#fbfbfa"/>']
-    for i, c in enumerate(cols):
-        out.append(f'<text x="{130 + i*260}" y="52" font-size="13" font-weight="600" '
-                   f'fill="#34495e">{_esc(c)}</text>')
-    for e in edges:
-        (x1, y1), (x2, y2) = pos[e["a"]], pos[e["b"]]
-        mx = (x1 + x2) / 2 + (40 if x1 != x2 else 0)
-        out.append(f'<path d="M{x1},{y1} Q{mx:.0f},{(y1+y2)/2:.0f} {x2},{y2}" '
-                   f'fill="none" stroke="#95a5a6" stroke-width="0.9" stroke-opacity="0.55"/>')
-    for n in nodes:
-        out.append(_svg_node(n))
-    out.append(f'<text x="16" y="{h-16}" font-size="10" fill="#7f8c8d">'
-               f'{len(nodes)} notes, {len(edges)} links  |  '
-               f'circle=architecture diamond=decision triangle=known-issue '
-               f'square=task hex=runbook  |  red ring=corrected  |  '
-               f'fill=severity, faded=settled</text>')
-    out.append("</svg>")
+           f'<rect width="{w}" height="{h}" fill="#fbfbfa"/>',
+           f'<text x="24" y="40" font-size="15" font-weight="700" fill="#2c3e50">'
+           f'{_esc(getattr(args, "_title", "grumpy"))}</text>',
+           f'<text x="24" y="60" font-size="11" fill="#7f8c8d">'
+           f'{len(nodes)} notes, {len(edges)} links  |  indent = linked from above  |  '
+           f'fill = severity, faded = settled, red ring = corrected</text>']
+    for r in rows:
+        out.append(_svg_row(r))
     print("\n".join(out))
     return 0
 
@@ -1974,6 +2028,8 @@ def main() -> int:
     gr.add_argument("--repo")
     gr.add_argument("--status")
     gr.add_argument("--all", action="store_true")
+    gr.add_argument("--svg", action="store_true",
+                    help="static SVG, deterministic layout, meant to be committed")
     gr.add_argument("--html", action="store_true",
                     help="one self-contained HTML file, no CDN and no build step")
     gr.set_defaults(fn=cmd_graph, json=False, expand=None)
